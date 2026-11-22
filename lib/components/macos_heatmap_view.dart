@@ -468,26 +468,12 @@ class _MacosHeatmapViewState extends State<MacosHeatmapView> {
               ),
             ),
           );
-        } else {
-          // Subtle start dot for multi-activity tracks
-          markers.add(
-            Marker(
-              point: first,
-              width: 10,
-              height: 10,
-              child: _routePinWidget(
-                fill: sportColor,
-                isDark: isDark,
-                size: 8,
-                borderWidth: 1.4,
-              ),
-            ),
-          );
         }
-      } else if (act.startLatitude != null &&
+      } else if (isSingleRoute &&
+          act.startLatitude != null &&
           act.startLongitude != null &&
           _isValidCoord(act.startLatitude!, act.startLongitude!)) {
-        // Fallback start-location marker for activities whose polylines haven't loaded yet
+        // Fallback start-location marker ONLY for single-activity view before polyline loads
         markers.add(
           Marker(
             point: LatLng(act.startLatitude!, act.startLongitude!),
@@ -659,9 +645,7 @@ class _MacosHeatmapViewState extends State<MacosHeatmapView> {
     final polylines = _buildPolylines(gpsActivities, speedRange, isDark);
     final markers = _buildMarkers(gpsActivities, isDark);
 
-    final tileUrl = isDark
-        ? 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
-        : 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png';
+    const tileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
     final distText = _formatDistance(totalKm, detailed: widget.colorByPace);
     final elevText = totalElevM > 0 ? ' • ${_formatElevation(totalElevM)}' : '';
@@ -778,10 +762,20 @@ class _MacosHeatmapViewState extends State<MacosHeatmapView> {
                           ),
                           children: [
                             TileLayer(
-                              key: ValueKey(isDark ? 'carto-dark' : 'carto-voyager'),
+                              key: ValueKey(isDark ? 'osm-dark' : 'osm-light'),
                               urlTemplate: tileUrl,
                               userAgentPackageName: 'com.pulse.training',
-                              retinaMode: true,
+                              tileBuilder: isDark
+                                  ? (context, tileWidget, tile) => ColorFiltered(
+                                        colorFilter: const ColorFilter.matrix([
+                                          -0.85, 0, 0, 0, 235,
+                                          0, -0.85, 0, 0, 238,
+                                          0, 0, -0.85, 0, 245,
+                                          0, 0, 0, 1, 0,
+                                        ]),
+                                        child: tileWidget,
+                                      )
+                                  : null,
                               errorTileCallback: (tile, error, stackTrace) {},
                             ),
                             if (polylines.isNotEmpty)

@@ -10,6 +10,8 @@ import '../models/performance_metrics.dart';
 import '../components/chart_painters.dart';
 import '../components/garmin_sign_in_dialog.dart';
 import '../components/macos_ui.dart';
+import '../components/zones_and_drift_cards.dart';
+import '../utils/physiological_metrics.dart';
 
 class AnalyticsView extends StatefulWidget {
   final AppState appState;
@@ -181,6 +183,9 @@ class _AnalyticsViewState extends State<AnalyticsView> {
           _buildWeeklyVolumeCard(),
 
           const SizedBox(height: 16),
+
+          // Weekly Time-in-Zone Breakdown & Long-Session Cardiac Drift
+          ..._buildWeeklyZonesAndDriftSection(),
 
           // Personal Records & Best Efforts (Real Synced Activities Only)
           _buildPersonalRecordsCard(),
@@ -628,6 +633,54 @@ class _AnalyticsViewState extends State<AnalyticsView> {
   // ---------------------------------------------------------------------------
   // 2. PERFORMANCE MANAGEMENT CHART
   // ---------------------------------------------------------------------------
+  List<Widget> _buildWeeklyZonesAndDriftSection() {
+    final acts = widget.appState.activities;
+    final hrZones7d = computeWeeklyHrZones(acts, days: 7);
+    final hrZones28d = computeWeeklyHrZones(acts, days: 28);
+    final activeZones = hrZones7d.any((z) => z.seconds > 0) ? hrZones7d : hrZones28d;
+    final windowLabel = hrZones7d.any((z) => z.seconds > 0) ? 'Last 7 Days' : 'Last 28 Days';
+
+    // Find most recent long run/ride (>= 60 min) with computable cardiac drift
+    CardiacDriftResult? latestDrift;
+    Activity? driftActivity;
+    for (final act in acts) {
+      final res = computeCardiacDrift(act, unit: widget.appState.unitSystem);
+      if (res != null) {
+        latestDrift = res;
+        driftActivity = act;
+        break;
+      }
+    }
+
+    final widgets = <Widget>[];
+    if (activeZones.any((z) => z.seconds > 0)) {
+      widgets.add(
+        TimeInZoneCard(
+          title: 'Heart Rate Time in Zone ($windowLabel)',
+          subtitle: 'Aggregated Z1–Z5 distribution from synced Garmin activities',
+          hrZones: activeZones,
+          powerZones: const [],
+        ),
+      );
+      widgets.add(const SizedBox(height: 16));
+    }
+
+    if (latestDrift != null && driftActivity != null) {
+      widgets.add(
+        InkWell(
+          onTap: () => widget.appState.setSelectedActivityId(driftActivity!.id),
+          borderRadius: BorderRadius.circular(10),
+          child: CardiacDriftCard(
+            result: latestDrift,
+            title: 'Latest Long Session Drift • ${widget.appState.displayTitleFor(driftActivity)}',
+          ),
+        ),
+      );
+      widgets.add(const SizedBox(height: 16));
+    }
+    return widgets;
+  }
+
   Widget _buildPmcCard(List<PmcDataPoint> visiblePmc) {
     final dateFmt = visiblePmc.length > 180 ? DateFormat('MMM d, yy') : DateFormat('MMM d');
     final focusedLabel = switch (_selectedKpi) {

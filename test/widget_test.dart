@@ -6,7 +6,25 @@ import 'package:http/testing.dart';
 import 'package:pulse_training_hub/main.dart';
 import 'package:pulse_training_hub/services/garmin_auth_store.dart';
 import 'package:pulse_training_hub/services/garmin_service.dart';
+import 'package:pulse_training_hub/services/local_data_cache.dart';
 import 'package:pulse_training_hub/state/app_state.dart';
+
+class _InMemoryDataCache extends LocalDataCache {
+  CachedTelemetrySnapshot? _snapshot;
+
+  @override
+  Future<void> save(CachedTelemetrySnapshot snapshot) async {
+    _snapshot = snapshot;
+  }
+
+  @override
+  Future<CachedTelemetrySnapshot?> load() async => _snapshot;
+
+  @override
+  Future<void> clear() async {
+    _snapshot = null;
+  }
+}
 
 class _InMemoryAuthStore extends GarminAuthStore {
   GarminSession? _session;
@@ -52,6 +70,7 @@ void main() {
 
     final appState = AppState(
       authStore: _InMemoryAuthStore(),
+      dataCache: _InMemoryDataCache(),
       autoRestoreSession: false,
     );
 
@@ -164,6 +183,7 @@ void main() {
     final appState = AppState(
       garminService: GarminService(client: mockClient),
       authStore: _InMemoryAuthStore(),
+      dataCache: _InMemoryDataCache(),
       autoRestoreSession: false,
     );
 
@@ -313,6 +333,7 @@ void main() {
     final appState = AppState(
       garminService: GarminService(client: mockClient),
       authStore: _InMemoryAuthStore(),
+      dataCache: _InMemoryDataCache(),
       autoRestoreSession: false,
     );
 

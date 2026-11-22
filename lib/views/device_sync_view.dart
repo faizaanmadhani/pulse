@@ -5,6 +5,7 @@ import '../theme/app_typography.dart';
 import '../state/app_state.dart';
 import '../models/device_status.dart';
 import '../components/garmin_sign_in_dialog.dart';
+import '../components/gear_tracker_card.dart';
 import '../components/strava_connect_dialog.dart';
 import '../components/macos_ui.dart';
 
@@ -32,6 +33,27 @@ class DeviceSyncView extends StatelessWidget {
 
           // Paired Garmin Devices (Real from Garmin Connect)
           _buildPairedDevicesSection(context),
+
+          const SizedBox(height: 16),
+
+          // Gear Mileage Tracker (Shoes & Bikes synced from Garmin + Strava)
+          GearTrackerCard(
+            items: appState.gearInventory,
+            unitSystem: appState.unitSystem,
+            isStravaConnected: appState.isStravaConnected,
+            onConnectStrava: () {
+              showStravaConnectDialog(
+                context,
+                onConnectOAuth: ({required clientId, required clientSecret}) =>
+                    appState.connectStravaOAuth(
+                  clientId: clientId,
+                  clientSecret: clientSecret,
+                ),
+                onConnectAccessToken: (token) => appState.connectStravaAccessToken(token),
+                initialError: appState.stravaError,
+              );
+            },
+          ),
 
           const SizedBox(height: 16),
 

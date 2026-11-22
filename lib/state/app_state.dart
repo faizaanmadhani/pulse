@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/activity.dart';
+import '../models/gear_item.dart';
 import '../models/strava_enrichment.dart';
 import '../models/training_block.dart';
 import '../models/performance_metrics.dart';
@@ -8,6 +9,8 @@ import '../models/device_status.dart';
 import '../services/garmin_auth_store.dart';
 import '../services/garmin_service.dart';
 import '../services/garmin_web_auth.dart';
+import '../services/gear_tracker_service.dart';
+import '../services/local_data_cache.dart';
 import '../services/strava_auth_store.dart';
 import '../services/strava_service.dart';
 import '../services/url_opener.dart';
@@ -20,6 +23,7 @@ class AppState extends ChangeNotifier {
   final GarminWebAuth _webAuth;
   final StravaService _stravaService;
   final StravaAuthStore _stravaStore;
+  final LocalDataCache _dataCache;
 
   int _currentNavIndex = 0;
   String _searchQuery = '';
@@ -69,12 +73,14 @@ class AppState extends ChangeNotifier {
     GarminWebAuth? webAuth,
     StravaService? stravaService,
     StravaAuthStore? stravaStore,
+    LocalDataCache? dataCache,
     bool autoRestoreSession = true,
   })  : _garminService = garminService ?? GarminService(),
         _authStore = authStore ?? const GarminAuthStore(),
         _webAuth = webAuth ?? const GarminWebAuth(),
         _stravaService = stravaService ?? StravaService(),
-        _stravaStore = stravaStore ?? const StravaAuthStore() {
+        _stravaStore = stravaStore ?? const StravaAuthStore(),
+        _dataCache = dataCache ?? const LocalDataCache() {
     AppColors.isDark = _isDarkMode;
     if (autoRestoreSession) {
       restoreSession();
@@ -98,6 +104,9 @@ class AppState extends ChangeNotifier {
   String? get stravaError => _stravaError;
   StravaSession? get stravaSession => _stravaSession;
   int get stravaMatchedCount => _stravaEnrichments.length;
+
+  List<GearItem> get gearInventory =>
+      GearTrackerService.computeGearInventory(activities, _stravaEnrichments);
 
   StravaActivityEnrichment? stravaEnrichmentFor(String garminActivityId) =>
       _stravaEnrichments[garminActivityId];
@@ -293,7 +302,8 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Attempts to restore previously saved Garmin & Strava sessions and race goals from disk.
+  /// Attempts to restore previously saved Garmin & Strava sessions, local disk cache,
+  /// and race goals for instant startup before refreshing in the background.
   Future<void> restoreSession() async {
     await _loadSavedRaceGoals();
     final storedStrava = await _stravaStore.load();
@@ -309,10 +319,43 @@ class AppState extends ChangeNotifier {
     }
     _session = stored.session;
     _userProfile = stored.profile;
+
+    // Hydrate instantly from local disk cache if available
+    final cached = await _dataCache.load();
+    if (cached != null && cached.activities.isNotEmpty) {
+      activities = cached.activities;
+      connectedDevices = cached.connectedDevices;
+      profile = cached.profile;
+      _stravaActivities = cached.stravaActivities;
+      _stravaEnrichments = Map<String, StravaActivityEnrichment>.from(cached.stravaEnrichments);
+      _lastSyncedAt = cached.lastSyncedAt;
+      final loadStats = TrainingLoadCalculator.computeFromActivities(activities);
+      pmcSeries = loadStats.pmcSeries;
+      _rebuildWeeklyScheduleFromActivities();
+    }
+
     notifyListeners();
     await syncFromGarmin();
     if (_stravaSession != null) {
       await syncFromStrava();
+    }
+  }
+
+  Future<void> _persistLocalCache() async {
+    if (_session == null) return;
+    try {
+      await _dataCache.save(
+        CachedTelemetrySnapshot(
+          activities: activities,
+          connectedDevices: connectedDevices,
+          profile: profile,
+          stravaActivities: _stravaActivities,
+          stravaEnrichments: _stravaEnrichments,
+          lastSyncedAt: _lastSyncedAt,
+        ),
+      );
+    } catch (_) {
+      // Non-fatal cache write failure
     }
   }
 
@@ -484,6 +527,7 @@ class AppState extends ChangeNotifier {
       _lastSyncedAt = DateTime.now();
       _backfillGeneration++;
       _backfillComplete = activities.length < 100;
+      _persistLocalCache();
 
       // Kick off non-blocking background fetch of GPS route polylines for the heatmap
       _prefetchRecentPolylines(activeSession);
@@ -570,6 +614,7 @@ class AppState extends ChangeNotifier {
           _rebuildWeeklyScheduleFromActivities();
           _rematchStravaActivities();
           _lastSyncedAt = DateTime.now();
+          _persistLocalCache();
           notifyListeners();
         }
 
@@ -599,7 +644,7 @@ class AppState extends ChangeNotifier {
             a.startLongitude != null &&
             a.routePoints.isEmpty &&
             !_loadedPolylineIds.contains(a.id))
-        .take(20)
+        .take(80)
         .toList();
     if (candidates.isEmpty) return;
 
@@ -632,10 +677,60 @@ class AppState extends ChangeNotifier {
             changed = true;
           }
         }
-        if (changed) notifyListeners();
+        if (changed) {
+          _persistLocalCache();
+          notifyListeners();
+        }
       }
     } finally {
       _isLoadingPolylines = false;
+      notifyListeners();
+    }
+  }
+
+  /// Lazily loads missing GPS polylines for a page of visible feed activities.
+  Future<void> ensurePolylinesLoaded(List<String> activityIds) async {
+    final session = _session;
+    if (session == null || activityIds.isEmpty) return;
+    final missing = activityIds.where((id) {
+      if (_loadedPolylineIds.contains(id)) return false;
+      final idx = activities.indexWhere((a) => a.id == id);
+      if (idx < 0) return false;
+      final act = activities[idx];
+      return act.routePoints.isEmpty && act.startLatitude != null && act.startLongitude != null;
+    }).take(6).toList();
+    if (missing.isEmpty) return;
+
+    for (final id in missing) {
+      _loadedPolylineIds.add(id);
+    }
+
+    final fetched = await Future.wait(
+      missing.map((id) async {
+        try {
+          final pts = await _garminService.fetchActivityPolyline(
+            session,
+            id,
+            maxPolylineSize: 120,
+          );
+          return (id, pts);
+        } catch (_) {
+          return (id, const <GpsPoint>[]);
+        }
+      }),
+    );
+
+    bool changed = false;
+    for (final (id, pts) in fetched) {
+      if (pts.isEmpty) continue;
+      final idx = activities.indexWhere((a) => a.id == id);
+      if (idx >= 0) {
+        activities[idx] = activities[idx].copyWith(routePoints: pts);
+        changed = true;
+      }
+    }
+    if (changed) {
+      _persistLocalCache();
       notifyListeners();
     }
   }
@@ -818,6 +913,7 @@ class AppState extends ChangeNotifier {
 
       _stravaActivities = all;
       _rematchStravaActivities();
+      _persistLocalCache();
     } catch (e) {
       _stravaError = e.toString();
     } finally {
@@ -879,6 +975,7 @@ class AppState extends ChangeNotifier {
   /// Signs out of Garmin Connect and clears all local cached tokens and data.
   Future<void> signOutGarmin() async {
     await _authStore.clear();
+    await _dataCache.clear();
     _session = null;
     _userProfile = null;
     _pendingMfa = null;

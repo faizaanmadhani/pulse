@@ -1140,21 +1140,37 @@ class TrainingLoadCalculator {
 
     final today = now ?? DateTime.now();
     final endDay = DateTime(today.year, today.month, today.day);
-    final startDay = endDay.subtract(Duration(days: days - 1));
 
     final dailyLoad = <DateTime, double>{};
+    DateTime? earliestActivityDay;
     for (final act in activities) {
       final d = DateTime(act.timestamp.year, act.timestamp.month, act.timestamp.day);
+      if (d.isAfter(endDay)) continue;
+      if (earliestActivityDay == null || d.isBefore(earliestActivityDay)) {
+        earliestActivityDay = d;
+      }
       // Use Garmin TSS / training load if present; otherwise estimate from duration (hours * 50)
       final load = act.tss ?? ((act.durationSeconds / 3600.0) * 50.0);
       dailyLoad[d] = (dailyLoad[d] ?? 0.0) + load;
     }
 
+    // Start from the earliest synced activity (up to 730 days back) so CTL/ATL warm up
+    // across full history and 12W/6M/1Y/ALL windows have complete data.
+    final minStartDay = endDay.subtract(Duration(days: days - 1));
+    final maxHistoryStart = endDay.subtract(const Duration(days: 729));
+    DateTime startDay = minStartDay;
+    if (earliestActivityDay != null && earliestActivityDay.isBefore(startDay)) {
+      startDay = earliestActivityDay.isBefore(maxHistoryStart)
+          ? maxHistoryStart
+          : earliestActivityDay;
+    }
+    final totalDays = endDay.difference(startDay).inDays + 1;
+
     double ctl = 0.0;
     double atl = 0.0;
     final series = <PmcDataPoint>[];
 
-    for (int i = 0; i < days; i++) {
+    for (int i = 0; i < totalDays; i++) {
       final day = startDay.add(Duration(days: i));
       final tss = dailyLoad[day] ?? 0.0;
       ctl = ctl + (tss - ctl) / 42.0;

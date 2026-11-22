@@ -7,10 +7,12 @@ import '../services/url_opener.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
+import '../utils/physiological_metrics.dart';
 import '../utils/unit_formatter.dart';
 import '../components/activity_telemetry_stack.dart';
 import '../components/macos_heatmap_view.dart';
 import '../components/macos_ui.dart';
+import '../components/zones_and_drift_cards.dart';
 
 /// Unified native macOS Activity Detail view with:
 /// - "View in Garmin" and "View in Strava" links
@@ -231,6 +233,9 @@ class _ActivityDetailViewState extends State<ActivityDetailView> {
             ),
           ],
 
+          // Heart Rate & Power Time-in-Zone Breakdown + Cardiac Drift (for 60+ min sessions)
+          ..._buildZonesAndDriftWidgets(unit),
+
           // Strava Comments & Segment Efforts (when joined with Strava)
           if (strava != null) ...[
             const SizedBox(height: 16),
@@ -250,6 +255,39 @@ class _ActivityDetailViewState extends State<ActivityDetailView> {
         ],
       ),
     );
+  }
+
+  List<Widget> _buildZonesAndDriftWidgets(UnitSystem unit) {
+    final hrZones = computeActivityHrZones(activity);
+    final powerZones = computeActivityPowerZones(activity);
+    final drift = computeCardiacDrift(activity, unit: unit);
+    final widgets = <Widget>[];
+
+    if (hrZones.isNotEmpty || powerZones.isNotEmpty) {
+      widgets.add(const SizedBox(height: 16));
+      widgets.add(
+        TimeInZoneCard(
+          title: 'Time in Zone',
+          subtitle: powerZones.isNotEmpty
+              ? 'Z1–Z5 Heart Rate & Power distribution'
+              : 'Z1–Z5 Heart Rate distribution',
+          hrZones: hrZones,
+          powerZones: powerZones,
+        ),
+      );
+    }
+
+    if (drift != null) {
+      widgets.add(const SizedBox(height: 16));
+      widgets.add(
+        CardiacDriftCard(
+          result: drift,
+          title: 'Cardiac Drift & Aerobic Decoupling (${drift.metricLabel})',
+        ),
+      );
+    }
+
+    return widgets;
   }
 
   Widget _buildStravaEnrichmentCard(StravaActivityEnrichment strava, UnitSystem unit) {
