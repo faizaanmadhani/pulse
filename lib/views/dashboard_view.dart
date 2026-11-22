@@ -10,6 +10,7 @@ import '../components/chart_painters.dart';
 import '../components/garmin_sign_in_dialog.dart';
 import '../components/macos_heatmap_view.dart';
 import '../components/macos_ui.dart';
+import 'activities_view.dart';
 
 class DashboardView extends StatelessWidget {
   final AppState appState;
@@ -38,33 +39,64 @@ class DashboardView extends StatelessWidget {
 
           const SizedBox(height: 16),
 
-          // Row 2: Multi-Sport Discipline Breakdown (Swim, Bike, Run, Strength)
-          _buildMultiSportStrip(),
+          // Row 2: Main 50% / 50% Split (Square-like GPS Heatmap on left, 2x2 Sport Cards + Charts on right)
+          _buildMainSplitSection(context),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
 
-          // Row 3: Interactive Activity GPS Heatmap (Real flutter_map tiles)
-          MacosHeatmapView(
-            activities: appState.activities,
-            activeFilter: appState.mapLayerFilter,
-            onFilterChanged: appState.setMapLayerFilter,
-            isSignedIn: appState.isSignedIn,
-            isLoadingRoutes: appState.isLoadingPolylines,
-            isImperial: appState.isImperial,
-            height: 360,
-          ),
-
-          const SizedBox(height: 16),
-
-          // Row 4: 14-Day Distance Chart + Sport Mix
-          _buildTrainingOverviewRow(),
-
-          const SizedBox(height: 16),
-
-          // Row 5: Recent Garmin Activities
+          // Row 3: Recent Garmin Activities (Strava-style feed cards with mini maps & telemetry)
           _buildRecentActivitiesCard(context),
         ],
       ),
+    );
+  }
+
+  Widget _buildMainSplitSection(BuildContext context) {
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final mapCanvasHeight = (screenHeight * 0.48).clamp(395.0, 480.0);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 960;
+        final heatmap = MacosHeatmapView(
+          activities: appState.activities,
+          activeFilter: appState.mapLayerFilter,
+          onFilterChanged: appState.setMapLayerFilter,
+          isSignedIn: appState.isSignedIn,
+          isLoadingRoutes: appState.isLoadingPolylines,
+          isImperial: appState.isImperial,
+          height: isWide ? mapCanvasHeight : 360,
+        );
+
+        final rightColumn = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildMultiSportStrip(),
+            const SizedBox(height: 12),
+            _buildTrainingOverviewRow(),
+          ],
+        );
+
+        if (isWide) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 1, child: heatmap),
+              const SizedBox(width: 14),
+              Expanded(flex: 1, child: rightColumn),
+            ],
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            heatmap,
+            const SizedBox(height: 14),
+            rightColumn,
+          ],
+        );
+      },
     );
   }
 
@@ -83,9 +115,10 @@ class DashboardView extends StatelessWidget {
               Container(
                 width: 40,
                 height: 40,
+                alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: AppColors.accent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
                   CupertinoIcons.waveform_path_ecg,
@@ -335,7 +368,7 @@ class DashboardView extends StatelessWidget {
               Expanded(
                 child: Row(
                   children: [
-                    Icon(CupertinoIcons.gauge, size: 15, color: statusColor),
+                    Icon(CupertinoIcons.gauge, size: 14, color: statusColor),
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
@@ -613,70 +646,80 @@ class DashboardView extends StatelessWidget {
       return UnitFormatter.formatStrengthDuration(sec);
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final cols = constraints.maxWidth > 920 ? 4 : 2;
-        return GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: cols,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: constraints.maxWidth > 920 ? 2.05 : 2.3,
+    final runCard = _buildSportCard(
+      title: 'Running',
+      icon: CupertinoIcons.flame_fill,
+      color: AppColors.runTertiary,
+      volume7d: appState.runVolume7d,
+      stat30d: appState.isSignedIn
+          ? '30d: ${UnitFormatter.formatDistance(runs.fold<double>(0, (s, a) => s + a.distanceKm), unit)} • ${runs.length} runs'
+          : '7d & 30d road / trail runs',
+      meta: appState.isSignedIn
+          ? '${UnitFormatter.formatElevation(runs.fold<double>(0, (s, a) => s + a.elevationGainM), unit)} elev'
+          : '—',
+      onTap: () => appState.setNavIndex(3),
+    );
+
+    final bikeCard = _buildSportCard(
+      title: 'Cycling',
+      icon: Icons.directions_bike_rounded,
+      color: AppColors.bikeSecondary,
+      volume7d: appState.bikeVolume7d,
+      stat30d: appState.isSignedIn
+          ? '30d: ${UnitFormatter.formatDistance(bikes.fold<double>(0, (s, a) => s + a.distanceKm), unit)} • ${bikes.length} rides'
+          : '7d & 30d road / indoor trainer',
+      meta: appState.isSignedIn
+          ? '${UnitFormatter.formatElevation(bikes.fold<double>(0, (s, a) => s + a.elevationGainM), unit)} elev'
+          : '—',
+      onTap: () => appState.setNavIndex(3),
+    );
+
+    final swimCard = _buildSportCard(
+      title: 'Swimming',
+      icon: CupertinoIcons.drop_fill,
+      color: AppColors.swimPrimary,
+      volume7d: appState.swimVolume7d,
+      stat30d: appState.isSignedIn
+          ? '30d: ${UnitFormatter.formatDistance(swims.fold<double>(0, (s, a) => s + a.distanceKm), unit, discipline: SportDiscipline.swim)} • ${swims.length} sessions'
+          : '7d & 30d pool / open water',
+      meta: appState.isSignedIn ? fmtDuration(swims) : '—',
+      onTap: () => appState.setNavIndex(3),
+    );
+
+    final strengthCard = _buildSportCard(
+      title: 'Strength',
+      icon: CupertinoIcons.sportscourt_fill,
+      color: AppColors.strengthViolet,
+      volume7d: appState.strengthVolume7d,
+      stat30d: appState.isSignedIn
+          ? '30d: ${fmtDuration(strengths)} • ${strengths.length} workouts'
+          : '7d & 30d strength & mobility',
+      meta: appState.isSignedIn
+          ? '${strengths.fold<int>(0, (s, a) => s + a.calories)} kcal'
+          : '—',
+      onTap: () => appState.setNavIndex(4),
+    );
+
+    // Compact 2x2 grid in exact order: Running, Cycling, Swimming, Strength
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
           children: [
-            _buildSportCard(
-              title: 'Swimming',
-              icon: CupertinoIcons.drop_fill,
-              color: AppColors.swimPrimary,
-              volume7d: appState.swimVolume7d,
-              stat30d: appState.isSignedIn
-                  ? '30d: ${UnitFormatter.formatDistance(swims.fold<double>(0, (s, a) => s + a.distanceKm), unit, discipline: SportDiscipline.swim)} • ${swims.length} sessions'
-                  : '7d & 30d pool / open water',
-              meta: appState.isSignedIn ? fmtDuration(swims) : '—',
-              onTap: () => appState.setNavIndex(3),
-            ),
-            _buildSportCard(
-              title: 'Cycling',
-              icon: Icons.directions_bike_rounded,
-              color: AppColors.bikeSecondary,
-              volume7d: appState.bikeVolume7d,
-              stat30d: appState.isSignedIn
-                  ? '30d: ${UnitFormatter.formatDistance(bikes.fold<double>(0, (s, a) => s + a.distanceKm), unit)} • ${bikes.length} rides'
-                  : '7d & 30d road / indoor trainer',
-              meta: appState.isSignedIn
-                  ? '${UnitFormatter.formatElevation(bikes.fold<double>(0, (s, a) => s + a.elevationGainM), unit)} elev'
-                  : '—',
-              onTap: () => appState.setNavIndex(3),
-            ),
-            _buildSportCard(
-              title: 'Running',
-              icon: CupertinoIcons.flame_fill,
-              color: AppColors.runTertiary,
-              volume7d: appState.runVolume7d,
-              stat30d: appState.isSignedIn
-                  ? '30d: ${UnitFormatter.formatDistance(runs.fold<double>(0, (s, a) => s + a.distanceKm), unit)} • ${runs.length} runs'
-                  : '7d & 30d road / trail runs',
-              meta: appState.isSignedIn
-                  ? '${UnitFormatter.formatElevation(runs.fold<double>(0, (s, a) => s + a.elevationGainM), unit)} elev'
-                  : '—',
-              onTap: () => appState.setNavIndex(3),
-            ),
-            _buildSportCard(
-              title: 'Strength',
-              icon: CupertinoIcons.sportscourt_fill,
-              color: AppColors.strengthViolet,
-              volume7d: appState.strengthVolume7d,
-              stat30d: appState.isSignedIn
-                  ? '30d: ${fmtDuration(strengths)} • ${strengths.length} workouts'
-                  : '7d & 30d strength & mobility',
-              meta: appState.isSignedIn
-                  ? '${strengths.fold<int>(0, (s, a) => s + a.calories)} kcal'
-                  : '—',
-              onTap: () => appState.setNavIndex(4),
-            ),
+            Expanded(child: runCard),
+            const SizedBox(width: 10),
+            Expanded(child: bikeCard),
           ],
-        );
-      },
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(child: swimCard),
+            const SizedBox(width: 10),
+            Expanded(child: strengthCard),
+          ],
+        ),
+      ],
     );
   }
 
@@ -693,10 +736,10 @@ class DashboardView extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: MacCard(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -705,15 +748,16 @@ class DashboardView extends StatelessWidget {
                   child: Row(
                     children: [
                       Container(
-                        width: 24,
-                        height: 24,
+                        width: 22,
+                        height: 22,
+                        alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: color.withOpacity(0.14),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Icon(icon, size: 13, color: color),
+                        child: Icon(icon, size: 12, color: color),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 7),
                       Expanded(
                         child: Text(
                           title,
@@ -731,15 +775,17 @@ class DashboardView extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 6),
             Row(
               crossAxisAlignment: CrossAxisAlignment.baseline,
               textBaseline: TextBaseline.alphabetic,
               children: [
                 Text(volume7d, style: AppTypography.telemetryHero),
-                const SizedBox(width: 6),
+                const SizedBox(width: 5),
                 Text('7d', style: AppTypography.bodySm),
               ],
             ),
+            const SizedBox(height: 2),
             Text(
               stat30d,
               style: AppTypography.bodySm,
@@ -774,91 +820,102 @@ class DashboardView extends StatelessWidget {
     final dailyDisplay = dailyKm
         .map((km) => UnitFormatter.convertDistance(km, unit))
         .toList();
-    final total14dDisplay = dailyDisplay.fold<double>(0, (a, b) => a + b);
+    final total14dKm = dailyKm.fold<double>(0, (a, b) => a + b);
     int countOf(SportDiscipline d) => appState.activities.where((a) => a.discipline == d).length;
     final totalActs = appState.activities.isEmpty ? 1 : appState.activities.length;
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          flex: 7,
-          child: MacCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('14-Day Activity Distance', style: AppTypography.headlineMd),
-                          const SizedBox(height: 2),
-                          Text(
-                            appState.isSignedIn
-                                ? '${total14dDisplay.toStringAsFixed(1)} $unitLabel across recent Garmin sessions'
-                                : 'Daily volume across all synced sports',
-                            style: AppTypography.bodySm,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            flex: 6,
+            child: MacCard(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('14-Day Activity Distance', style: AppTypography.headlineMd),
+                            const SizedBox(height: 2),
+                            Text(
+                              appState.isSignedIn
+                                  ? '${UnitFormatter.formatDistance(total14dKm, unit)} across recent sessions'
+                                  : 'Daily volume across all synced sports',
+                              style: AppTypography.bodySm,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    MacStatusBadge(label: 'Garmin Connect', color: AppColors.accent),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                InteractiveDailyBarChart(
-                  values: dailyDisplay,
-                  labels: dayLabels,
-                  barColor: AppColors.accent,
-                  unit: unitLabel,
-                  height: 140,
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(dayLabels.first, style: AppTypography.bodySm),
-                    Text(dayLabels[dayLabels.length ~/ 2], style: AppTypography.bodySm),
-                    Text('Today', style: AppTypography.bodySm),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 8),
+                      MacStatusBadge(label: 'Garmin', color: AppColors.accent),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  InteractiveDailyBarChart(
+                    values: dailyDisplay,
+                    labels: dayLabels,
+                    barColor: AppColors.accent,
+                    unit: unitLabel,
+                    height: 125,
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(dayLabels.first, style: AppTypography.bodySm),
+                      Text(dayLabels[dayLabels.length ~/ 2], style: AppTypography.bodySm),
+                      Text('Today', style: AppTypography.bodySm),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          flex: 4,
-          child: MacCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Multi-Sport Mix', style: AppTypography.headlineMd),
-                const SizedBox(height: 2),
-                Text('Distribution across synced sessions', style: AppTypography.bodySm),
-                const SizedBox(height: 16),
-                _buildSportMixRow('Running', countOf(SportDiscipline.run), totalActs, AppColors.runTertiary),
-                const SizedBox(height: 10),
-                _buildSportMixRow(
-                  'Cycling',
-                  countOf(SportDiscipline.bike) + countOf(SportDiscipline.indoorBike),
-                  totalActs,
-                  AppColors.bikeSecondary,
-                ),
-                const SizedBox(height: 10),
-                _buildSportMixRow('Swimming', countOf(SportDiscipline.swim), totalActs, AppColors.swimPrimary),
-                const SizedBox(height: 10),
-                _buildSportMixRow('Strength', countOf(SportDiscipline.strength), totalActs, AppColors.strengthViolet),
-              ],
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 5,
+            child: MacCard(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Multi-Sport Mix', style: AppTypography.headlineMd),
+                      const SizedBox(height: 2),
+                      Text('Synced session share', style: AppTypography.bodySm),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  _buildSportMixRow('Running', countOf(SportDiscipline.run), totalActs, AppColors.runTertiary),
+                  const SizedBox(height: 8),
+                  _buildSportMixRow(
+                    'Cycling',
+                    countOf(SportDiscipline.bike) + countOf(SportDiscipline.indoorBike),
+                    totalActs,
+                    AppColors.bikeSecondary,
+                  ),
+                  const SizedBox(height: 8),
+                  _buildSportMixRow('Swimming', countOf(SportDiscipline.swim), totalActs, AppColors.swimPrimary),
+                  const SizedBox(height: 8),
+                  _buildSportMixRow('Strength', countOf(SportDiscipline.strength), totalActs, AppColors.strengthViolet),
+                ],
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -902,36 +959,49 @@ class DashboardView extends StatelessWidget {
   }
 
   Widget _buildRecentActivitiesCard(BuildContext context) {
-    final recent = appState.activities.take(8).toList();
+    final recent = appState.activities.take(6).toList();
 
-    return MacCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Recent Activities', style: AppTypography.headlineMd),
-              if (appState.activities.isNotEmpty)
-                InkWell(
-                  onTap: () => appState.setNavIndex(3),
-                  borderRadius: BorderRadius.circular(5),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    child: Text(
-                      'View All (${appState.activities.length})',
-                      style: AppTypography.bodySm.copyWith(
-                        color: AppColors.accent,
-                        fontWeight: FontWeight.w600,
-                      ),
+    // Lazily fetch GPS route polylines for recent feed cards on the Dashboard
+    if (recent.isNotEmpty) {
+      final idsToEnsure = recent
+          .where((a) => a.routePoints.isEmpty && a.startLatitude != null)
+          .map((a) => a.id)
+          .toList();
+      if (idsToEnsure.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          appState.ensurePolylinesLoaded(idsToEnsure);
+        });
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Recent Activities', style: AppTypography.headlineMd),
+            if (appState.activities.isNotEmpty)
+              InkWell(
+                onTap: () => appState.setNavIndex(3),
+                borderRadius: BorderRadius.circular(5),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  child: Text(
+                    'View All (${appState.activities.length})',
+                    style: AppTypography.bodySm.copyWith(
+                      color: AppColors.accent,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (recent.isEmpty)
-            Padding(
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (recent.isEmpty)
+          MacCard(
+            child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 24),
               child: Center(
                 child: Text(
@@ -943,116 +1013,11 @@ class DashboardView extends StatelessWidget {
                   style: AppTypography.bodyMd,
                 ),
               ),
-            )
-          else
-            ...recent.asMap().entries.map((entry) {
-              final isLast = entry.key == recent.length - 1;
-              return Column(
-                children: [
-                  _buildActivityRow(entry.value),
-                  if (!isLast) Divider(height: 1, color: AppColors.borderDivider),
-                ],
-              );
-            }),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActivityRow(Activity act) {
-    final (Color color, IconData icon) = switch (act.discipline) {
-      SportDiscipline.bike => (AppColors.bikeSecondary, Icons.directions_bike_rounded),
-      SportDiscipline.indoorBike => (AppColors.bikeSecondary, CupertinoIcons.bolt_fill),
-      SportDiscipline.run => (AppColors.runTertiary, CupertinoIcons.flame),
-      SportDiscipline.swim => (AppColors.swimPrimary, CupertinoIcons.drop_fill),
-      SportDiscipline.strength => (AppColors.strengthViolet, CupertinoIcons.sportscourt),
-    };
-
-    return InkWell(
-      onTap: () => appState.setSelectedActivityId(act.id),
-      borderRadius: BorderRadius.circular(7),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-        child: Row(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.13),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, size: 17, color: color),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          appState.displayTitleFor(act),
-                          style: AppTypography.headlineSm,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (appState.stravaEnrichmentFor(act.id) != null) ...[
-                        const SizedBox(width: 6),
-                        const Icon(
-                          CupertinoIcons.flame_fill,
-                          size: 11,
-                          color: Color(0xFFFC4C02),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${act.formattedDate}${act.location.isNotEmpty ? ' • ${act.location}' : ''}',
-                    style: AppTypography.bodySm,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            _metricColumn(
-              act.distanceKm > 0 ? appState.formatActivityDistance(act) : act.movingTime,
-              act.distanceKm > 0 ? act.movingTime : 'Duration',
-            ),
-            const SizedBox(width: 20),
-            _metricColumn(
-              appState.formatActivityPaceOrSpeed(act),
-              act.avgHr > 0 ? '${act.avgHr} bpm' : 'Pace / Speed',
-            ),
-            const SizedBox(width: 12),
-            Icon(CupertinoIcons.chevron_right, size: 14, color: AppColors.outline),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _metricColumn(String primary, String secondary) {
-    return SizedBox(
-      width: 96,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            primary,
-            style: AppTypography.telemetryMd.copyWith(fontWeight: FontWeight.w600),
-            overflow: TextOverflow.ellipsis,
-          ),
-          Text(
-            secondary,
-            style: AppTypography.bodySm,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
+          )
+        else
+          ActivityFeedGrid(activities: recent, appState: appState),
+      ],
     );
   }
 }

@@ -269,6 +269,72 @@ void main() {
       expect(load.acwr, isNull);
     });
 
+    test('TrainingLoadCalculator computes CTL, ATL, TSB across multi-year history', () {
+      final now = DateTime(2026, 11, 21);
+      final oldActivity = Activity(
+        id: 'old-1',
+        title: 'Old Marathon Build',
+        description: '',
+        discipline: SportDiscipline.run,
+        timestamp: DateTime(2024, 6, 1, 8, 0),
+        formattedDate: 'Jun 1, 2024',
+        location: 'Boston',
+        deviceHardware: 'Forerunner 965',
+        sensorChain: '',
+        distanceKm: 20.0,
+        durationSeconds: 5400,
+        movingTime: '1h 30m',
+        elapsedTime: '1h 30m',
+        avgSpeedOrPace: '4:30 /km',
+        maxSpeedOrPace: '4:00 /km',
+        avgHr: 155,
+        maxHr: 175,
+        elevationGainM: 120,
+        elevationLossM: 120,
+        tss: 120,
+        calories: 1200,
+        avgCadence: 178,
+        maxCadence: 190,
+      );
+      final recentActivity = Activity(
+        id: 'recent-1',
+        title: 'Recent Tempo',
+        description: '',
+        discipline: SportDiscipline.run,
+        timestamp: DateTime(2026, 11, 20, 8, 0),
+        formattedDate: 'Nov 20, 2026',
+        location: 'Boston',
+        deviceHardware: 'Forerunner 965',
+        sensorChain: '',
+        distanceKm: 10.0,
+        durationSeconds: 2700,
+        movingTime: '45m',
+        elapsedTime: '45m',
+        avgSpeedOrPace: '4:30 /km',
+        maxSpeedOrPace: '4:00 /km',
+        avgHr: 160,
+        maxHr: 180,
+        elevationGainM: 50,
+        elevationLossM: 50,
+        tss: 70,
+        calories: 650,
+        avgCadence: 180,
+        maxCadence: 192,
+      );
+
+      final load = TrainingLoadCalculator.computeFromActivities(
+        [recentActivity, oldActivity],
+        now: now,
+      );
+
+      // Should span from 2024-06-01 to 2026-11-21 (> 730 days)
+      expect(load.pmcSeries.length, greaterThan(800));
+      expect(load.pmcSeries.first.date, DateTime(2024, 6, 1));
+      expect(load.pmcSeries.first.ctl, greaterThan(0));
+      expect(load.pmcSeries.first.atl, greaterThan(0));
+      expect(load.pmcSeries.first.tsb, lessThan(0));
+    });
+
     test('GarminAuthStore persists, loads, and clears session', () async {
       final tempDir = await Directory.systemTemp.createTemp('garmin_store_test_');
       addTearDown(() => tempDir.delete(recursive: true));

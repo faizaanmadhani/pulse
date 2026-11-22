@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../models/activity.dart';
 import '../models/device_status.dart';
 import '../models/performance_metrics.dart';
+import '../utils/physiological_metrics.dart';
 import 'garmin_auth_store.dart';
 
 class GarminAuthException implements Exception {
@@ -675,6 +676,56 @@ class GarminService {
     return splits;
   }
 
+  /// Fetches Garmin Connect's real heart rate and power time-in-zone
+  /// distributions for [activityId].
+  Future<({List<ZoneBucket> hrZones, List<ZoneBucket> powerZones})>
+      fetchActivityTimeInZones(
+    GarminSession session,
+    String activityId,
+  ) async {
+    final results = await Future.wait([
+      _fetchTimeInZoneEndpoint(
+        session,
+        activityId,
+        'hrTimeInZones',
+        isPower: false,
+      ),
+      _fetchTimeInZoneEndpoint(
+        session,
+        activityId,
+        'powerTimeInZones',
+        isPower: true,
+      ),
+    ]);
+    return (hrZones: results[0], powerZones: results[1]);
+  }
+
+  Future<List<ZoneBucket>> _fetchTimeInZoneEndpoint(
+    GarminSession session,
+    String activityId,
+    String endpoint, {
+    required bool isPower,
+  }) async {
+    final uri = Uri.parse(
+      'https://connectapi.${session.domain}/activity-service/activity/$activityId/$endpoint',
+    );
+    final res =
+        await _client.get(uri, headers: _apiHeaders(session)).timeout(_timeout);
+    if (res.statusCode == 401) {
+      throw const GarminUnauthorizedException();
+    }
+    if (res.statusCode != 200 || res.body.isEmpty) return const [];
+
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(res.body);
+    } catch (_) {
+      return const [];
+    }
+    if (decoded is! List) return const [];
+    return parseGarminTimeInZones(decoded, isPower: isPower);
+  }
+
   /// Fetches downsampled GPS polyline + synchronized per-point telemetry streams
   /// (elevation, HR, speed, cadence, power, vertical oscillation, GCT) from Garmin Connect.
   Future<List<GpsPoint>> fetchActivityPolyline(
@@ -1158,10 +1209,10 @@ class TrainingLoadCalculator {
       dailyLoad[d] = (dailyLoad[d] ?? 0.0) + load;
     }
 
-    // Start from the earliest synced activity (up to 730 days back) so CTL/ATL warm up
+    // Start from the earliest synced activity (up to 5 years back) so CTL/ATL warm up
     // across full history and 12W/6M/1Y/ALL windows have complete data.
     final minStartDay = endDay.subtract(Duration(days: days - 1));
-    final maxHistoryStart = endDay.subtract(const Duration(days: 729));
+    final maxHistoryStart = endDay.subtract(const Duration(days: 1824));
     DateTime startDay = minStartDay;
     if (earliestActivityDay != null && earliestActivityDay.isBefore(startDay)) {
       startDay = earliestActivityDay.isBefore(maxHistoryStart)

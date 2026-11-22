@@ -78,7 +78,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Native macOS labels present
-    expect(find.text('Pulse Training'), findsOneWidget);
+    expect(find.text('Pulse'), findsOneWidget);
     expect(find.text('Dashboard'), findsWidgets);
     expect(find.text('Calendar'), findsOneWidget);
     expect(find.text('Analytics'), findsOneWidget);

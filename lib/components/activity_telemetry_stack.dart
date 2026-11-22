@@ -29,6 +29,29 @@ class ActivityTelemetryStack extends StatelessWidget {
   static const double _topPad = 6.0;
   static const double _bottomPad = 6.0;
 
+  static bool hasStreams(Activity activity) {
+    final pts = activity.routePoints;
+    if (pts.length < 2) return false;
+    bool hasAtLeastTwo(bool Function(GpsPoint p) pred) {
+      int count = 0;
+      for (final p in pts) {
+        if (pred(p)) {
+          count++;
+          if (count >= 2) return true;
+        }
+      }
+      return false;
+    }
+
+    return hasAtLeastTwo((p) => p.speedMps != null && p.speedMps!.isFinite && p.speedMps! > 0.2) ||
+        hasAtLeastTwo((p) => p.heartRate != null && p.heartRate! > 20) ||
+        hasAtLeastTwo((p) => p.elevationM != null && p.elevationM!.isFinite) ||
+        hasAtLeastTwo((p) => p.cadence != null && p.cadence! > 0) ||
+        hasAtLeastTwo((p) => p.powerW != null && p.powerW! > 0) ||
+        hasAtLeastTwo((p) => p.verticalOscillationCm != null && p.verticalOscillationCm!.isFinite && p.verticalOscillationCm! > 0) ||
+        hasAtLeastTwo((p) => p.groundContactTimeMs != null && p.groundContactTimeMs! > 0);
+  }
+
   bool get _isBike =>
       activity.discipline == SportDiscipline.bike ||
       activity.discipline == SportDiscipline.indoorBike;
@@ -435,9 +458,13 @@ class ActivityTelemetryStack extends StatelessWidget {
                       color: AppColors.accent,
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      'Synchronized Telemetry',
-                      style: AppTypography.headlineMd,
+                    Flexible(
+                      child: Text(
+                        'Synchronized Telemetry',
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        style: AppTypography.headlineMd,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -543,22 +570,32 @@ class ActivityTelemetryStack extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 6),
-              Text(
-                stream.title,
-                style: AppTypography.bodySm.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.onSurface,
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        stream.title,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        style: AppTypography.bodySm.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.onSurface,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '(${stream.unitLabel})',
+                      style: AppTypography.bodySm.copyWith(
+                        fontSize: 10,
+                        color: AppColors.outline,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 6),
-              Text(
-                '(${stream.unitLabel})',
-                style: AppTypography.bodySm.copyWith(
-                  fontSize: 10,
-                  color: AppColors.outline,
-                ),
-              ),
-              const Spacer(),
+              const SizedBox(width: 8),
               if (hoveredVal != null) ...[
                 Text(
                   stream.formatValue(hoveredVal),
@@ -569,7 +606,7 @@ class ActivityTelemetryStack extends StatelessWidget {
                   ),
                 ),
                 if (cursorDistText != null) ...[
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Text(
                     '@ $cursorDistText',
                     style: AppTypography.telemetrySm.copyWith(
@@ -656,11 +693,15 @@ class ActivityTelemetryStack extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           for (final label in ticks)
-            Text(
-              label,
-              style: AppTypography.telemetrySm.copyWith(
-                fontSize: 10,
-                color: AppColors.outline,
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                style: AppTypography.telemetrySm.copyWith(
+                  fontSize: 10,
+                  color: AppColors.outline,
+                ),
               ),
             ),
         ],

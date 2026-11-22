@@ -81,13 +81,24 @@ class MacPushButton extends StatelessWidget {
       border = BorderSide(color: AppColors.borderSubtle, width: 1);
     }
 
+    final EdgeInsets resolvedPadding = padding.resolve(Directionality.of(context));
+    final bool hasLeadingVisual = isLoading || icon != null;
+    final EdgeInsets effectivePadding = hasLeadingVisual
+        ? EdgeInsets.fromLTRB(
+            (resolvedPadding.left - 2).clamp(4.0, double.infinity),
+            resolvedPadding.top,
+            resolvedPadding.right,
+            resolvedPadding.bottom,
+          )
+        : resolvedPadding;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: enabled ? onPressed : null,
         borderRadius: BorderRadius.circular(6),
         child: Container(
-          padding: padding,
+          padding: effectivePadding,
           decoration: BoxDecoration(
             color: bgColor,
             borderRadius: BorderRadius.circular(6),
@@ -174,13 +185,13 @@ class MacSegmentedControl<T> extends StatelessWidget {
           final dotColor = dotColorBuilder?.call(item);
           return InkWell(
             onTap: () => onChanged(item),
-            borderRadius: BorderRadius.circular(5),
+            borderRadius: BorderRadius.circular(4),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: isSelected ? AppColors.surfaceContainer : Colors.transparent,
-                borderRadius: BorderRadius.circular(5),
+                borderRadius: BorderRadius.circular(4),
                 boxShadow: isSelected
                     ? [
                         BoxShadow(
@@ -239,7 +250,7 @@ class MacStatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+      padding: EdgeInsets.fromLTRB(icon != null ? 5 : 7, 2.5, 7, 2.5),
       decoration: BoxDecoration(
         color: color.withOpacity(AppColors.isDark ? 0.22 : 0.12),
         borderRadius: BorderRadius.circular(5),

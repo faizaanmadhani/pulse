@@ -792,6 +792,7 @@ class _MacosHeatmapViewState extends State<MacosHeatmapView> {
                   if (!widget.isSignedIn || gpsActivities.isEmpty)
                     Center(
                       child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
                         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                         decoration: BoxDecoration(
                           color: AppColors.surfaceContainer.withOpacity(0.92),
@@ -816,13 +817,15 @@ class _MacosHeatmapViewState extends State<MacosHeatmapView> {
                               color: AppColors.outline,
                             ),
                             const SizedBox(width: 8),
-                            Text(
-                              !widget.isSignedIn
-                                  ? 'Sign in with Garmin Connect to plot your real GPS routes'
-                                  : widget.isLoadingRoutes
-                                      ? 'Fetching GPS tracks from Garmin Connect...'
-                                      : 'No GPS routes found for this sport filter',
-                              style: AppTypography.bodyMd.copyWith(color: AppColors.onSurface),
+                            Flexible(
+                              child: Text(
+                                !widget.isSignedIn
+                                    ? 'Sign in with Garmin Connect to plot your real GPS routes'
+                                    : widget.isLoadingRoutes
+                                        ? 'Fetching GPS tracks from Garmin Connect...'
+                                        : 'No GPS routes found for this sport filter',
+                                style: AppTypography.bodyMd.copyWith(color: AppColors.onSurface),
+                              ),
                             ),
                           ],
                         ),

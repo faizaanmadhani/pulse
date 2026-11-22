@@ -1,3 +1,5 @@
+import '../utils/physiological_metrics.dart';
+
 enum SportDiscipline {
   swim,
   bike,
@@ -193,6 +195,8 @@ class Activity {
   final int? swolf;
   final String? gearName;
   final double? gearUsageKm;
+  final List<ZoneBucket>? garminHrZones;
+  final List<ZoneBucket>? garminPowerZones;
 
   const Activity({
     required this.id,
@@ -235,12 +239,16 @@ class Activity {
     this.swolf,
     this.gearName,
     this.gearUsageKm,
+    this.garminHrZones,
+    this.garminPowerZones,
   });
 
   Activity copyWith({
     List<ActivitySplit>? splits,
     List<GpsPoint>? routePoints,
     String? deviceHardware,
+    List<ZoneBucket>? garminHrZones,
+    List<ZoneBucket>? garminPowerZones,
   }) {
     return Activity(
       id: id,
@@ -283,6 +291,8 @@ class Activity {
       swolf: swolf,
       gearName: gearName,
       gearUsageKm: gearUsageKm,
+      garminHrZones: garminHrZones ?? this.garminHrZones,
+      garminPowerZones: garminPowerZones ?? this.garminPowerZones,
     );
   }
 }

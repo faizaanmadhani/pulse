@@ -6,6 +6,7 @@ import '../theme/app_typography.dart';
 import '../state/app_state.dart';
 import '../models/activity.dart';
 import '../models/training_block.dart';
+import '../utils/unit_formatter.dart';
 import '../components/garmin_sign_in_dialog.dart';
 import '../components/macos_ui.dart';
 
@@ -134,10 +135,7 @@ class _CalendarViewState extends State<CalendarView> {
 
   String _formatDistanceShort(Activity a) {
     if (a.distanceKm <= 0) return _formatDuration(a.durationSeconds);
-    if (a.discipline == SportDiscipline.swim) {
-      return '${(a.distanceKm * 1000).round()} m';
-    }
-    return '${a.distanceKm.toStringAsFixed(1)} km';
+    return widget.appState.formatActivityDistance(a);
   }
 
   Map<DateTime, List<Activity>> _groupActivitiesByDay() {
@@ -200,7 +198,9 @@ class _CalendarViewState extends State<CalendarView> {
     final totalKm = periodActs.fold<double>(0, (s, a) => s + a.distanceKm);
     final totalSec = periodActs.fold<double>(0, (s, a) => s + a.durationSeconds);
     final countLabel = '${periodActs.length} ${periodActs.length == 1 ? 'activity' : 'activities'}';
-    final distPart = totalKm > 0 ? ' • ${totalKm.toStringAsFixed(1)} km' : '';
+    final distPart = totalKm > 0
+        ? ' • ${UnitFormatter.formatDistance(totalKm, widget.appState.unitSystem)}'
+        : '';
     final durPart = totalSec > 0 ? ' • ${_formatDuration(totalSec)}' : '';
     return '$countLabel$distPart$durPart';
   }
@@ -657,7 +657,7 @@ class _CalendarViewState extends State<CalendarView> {
                   if (totalKm > 0)
                     Flexible(
                       child: Text(
-                        '${totalKm.toStringAsFixed(1)}k',
+                        UnitFormatter.formatDistance(totalKm, widget.appState.unitSystem),
                         style: AppTypography.telemetrySm.copyWith(
                           fontSize: 10,
                           color: AppColors.outline,
@@ -776,9 +776,9 @@ class _CalendarViewState extends State<CalendarView> {
             runSpacing: 6,
             children: [
               _inlineStat('Sessions', '${weekActs.length}'),
-              _inlineStat('Distance', '${weekDist.toStringAsFixed(1)} km'),
+              _inlineStat('Distance', UnitFormatter.formatDistance(weekDist, widget.appState.unitSystem)),
               _inlineStat('Duration', _formatDuration(weekSec)),
-              _inlineStat('Elevation', '${weekElev.round()} m'),
+              _inlineStat('Elevation', UnitFormatter.formatElevation(weekElev, widget.appState.unitSystem)),
             ],
           ),
         ),
@@ -853,7 +853,7 @@ class _CalendarViewState extends State<CalendarView> {
                       const SizedBox(height: 3),
                       Text(
                         dayDist > 0
-                            ? '${dayDist.toStringAsFixed(1)} km • ${_formatDuration(daySec)}'
+                            ? '${UnitFormatter.formatDistance(dayDist, widget.appState.unitSystem)} • ${_formatDuration(daySec)}'
                             : _formatDuration(daySec),
                         style: AppTypography.telemetrySm.copyWith(
                           fontSize: 10,
@@ -948,10 +948,10 @@ class _CalendarViewState extends State<CalendarView> {
               style: AppTypography.telemetrySm.copyWith(fontSize: 10.5),
               overflow: TextOverflow.ellipsis,
             ),
-            if (a.avgHr > 0 || a.avgSpeedOrPace.isNotEmpty) ...[
+            if (a.avgHr > 0 || widget.appState.formatActivityPaceOrSpeed(a) != '—') ...[
               const SizedBox(height: 2),
               Text(
-                a.avgHr > 0 ? '${a.avgHr} bpm' : a.avgSpeedOrPace,
+                a.avgHr > 0 ? '${a.avgHr} bpm' : widget.appState.formatActivityPaceOrSpeed(a),
                 style: AppTypography.bodySm.copyWith(fontSize: 10),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -986,7 +986,7 @@ class _CalendarViewState extends State<CalendarView> {
             Expanded(
               child: _dayStatTile(
                 'Distance',
-                totalDist > 0 ? '${totalDist.toStringAsFixed(1)} km' : '0.0 km',
+                UnitFormatter.formatDistance(totalDist, widget.appState.unitSystem),
                 CupertinoIcons.map,
                 AppColors.runTertiary,
               ),
@@ -1004,7 +1004,7 @@ class _CalendarViewState extends State<CalendarView> {
             Expanded(
               child: _dayStatTile(
                 'Elevation',
-                '${totalElev.round()} m',
+                UnitFormatter.formatElevation(totalElev, widget.appState.unitSystem),
                 CupertinoIcons.arrow_up_right,
                 AppColors.bikeSecondary,
               ),
@@ -1172,15 +1172,16 @@ class _CalendarViewState extends State<CalendarView> {
                     children: [
                       if (a.distanceKm > 0) _inlineStat('Distance', _formatDistanceShort(a)),
                       _inlineStat('Time', a.movingTime),
-                      if (a.avgSpeedOrPace.isNotEmpty && a.avgSpeedOrPace != '—')
+                      if (widget.appState.formatActivityPaceOrSpeed(a) != '—')
                         _inlineStat(
                           a.discipline == SportDiscipline.bike || a.discipline == SportDiscipline.indoorBike
                               ? 'Avg Speed'
                               : 'Avg Pace',
-                          a.avgSpeedOrPace,
+                          widget.appState.formatActivityPaceOrSpeed(a),
                         ),
                       if (a.avgHr > 0) _inlineStat('Avg HR', '${a.avgHr} bpm'),
-                      if (a.elevationGainM > 0) _inlineStat('Elev Gain', '${a.elevationGainM.round()} m'),
+                      if (a.elevationGainM > 0)
+                        _inlineStat('Elev Gain', widget.appState.formatActivityElevation(a.elevationGainM)),
                       if (a.avgPowerW != null && a.avgPowerW! > 0)
                         _inlineStat('Avg Power', '${a.avgPowerW} W'),
                       if (a.calories > 0) _inlineStat('Calories', '${a.calories} kcal'),

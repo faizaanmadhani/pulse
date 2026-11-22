@@ -12,6 +12,7 @@ import '../components/garmin_sign_in_dialog.dart';
 import '../components/macos_ui.dart';
 import '../components/zones_and_drift_cards.dart';
 import '../utils/physiological_metrics.dart';
+import '../utils/unit_formatter.dart';
 
 class AnalyticsView extends StatefulWidget {
   final AppState appState;
@@ -48,20 +49,9 @@ class _AnalyticsViewState extends State<AnalyticsView> {
     return (a.durationSeconds / 3600.0) * 50.0;
   }
 
-  String _formatPaceMinPerKm(double secPerKm) {
+  String _formatRunPace(double secPerKm, UnitSystem unit) {
     if (!secPerKm.isFinite || secPerKm <= 0) return '—';
-    final totalSec = secPerKm.round();
-    final min = totalSec ~/ 60;
-    final sec = totalSec % 60;
-    return '$min:${sec.toString().padLeft(2, '0')} /km';
-  }
-
-  String _formatPacePer100m(double secPer100m) {
-    if (!secPer100m.isFinite || secPer100m <= 0) return '—';
-    final totalSec = secPer100m.round();
-    final min = totalSec ~/ 60;
-    final sec = totalSec % 60;
-    return '$min:${sec.toString().padLeft(2, '0')} /100m';
+    return UnitFormatter.formatPaceOrSpeed(SportDiscipline.run, 1000.0 / secPerKm, unit);
   }
 
   String _formatDurationClock(double seconds) {
@@ -161,7 +151,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
           const SizedBox(height: 16),
 
           // 4 Interactive KPI Cards with Mini Graphics & Derivation Details
-          _buildKpiCardsSection(p, pmc),
+          _buildKpiCardsSection(p, pmc, visiblePmc),
 
           // Expandable Metric Deep-Dive Panel when a KPI card is selected
           if (_selectedKpi != null) ...[
@@ -212,14 +202,18 @@ class _AnalyticsViewState extends State<AnalyticsView> {
   // ---------------------------------------------------------------------------
   // 1. TOP 4 KPI CARDS WITH MINI GRAPHICS + GRANULAR DERIVATION + DRILL-DOWN
   // ---------------------------------------------------------------------------
-  Widget _buildKpiCardsSection(AthletePhysiologicalProfile p, List<PmcDataPoint> pmc) {
-    final tail14 = pmc.length > 14 ? pmc.sublist(pmc.length - 14) : pmc;
+  Widget _buildKpiCardsSection(
+    AthletePhysiologicalProfile p,
+    List<PmcDataPoint> pmc,
+    List<PmcDataPoint> visiblePmc,
+  ) {
+    final sparkSeries = visiblePmc.length >= 2 ? visiblePmc : pmc;
     final tail7 = pmc.length > 7 ? pmc.sublist(pmc.length - 7) : pmc;
     final tail42 = pmc.length > 42 ? pmc.sublist(pmc.length - 42) : pmc;
 
-    final ctl14 = tail14.map((e) => e.ctl).toList();
-    final atl14 = tail14.map((e) => e.atl).toList();
-    final tsb14 = tail14.map((e) => e.tsb).toList();
+    final ctlSpark = sparkSeries.map((e) => e.ctl).toList();
+    final atlSpark = sparkSeries.map((e) => e.atl).toList();
+    final tsbSpark = sparkSeries.map((e) => e.tsb).toList();
 
     final ctl7dDelta = pmc.length >= 8 ? (pmc.last.ctl - pmc[pmc.length - 8].ctl) : null;
     final avgTss42 = tail42.isNotEmpty
@@ -249,7 +243,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
           width: double.infinity,
           child: CustomPaint(
             painter: _MiniSparklinePainter(
-              values: ctl14,
+              values: ctlSpark,
               color: AppColors.swimPrimary,
             ),
           ),
@@ -270,7 +264,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
           width: double.infinity,
           child: CustomPaint(
             painter: _MiniSparklinePainter(
-              values: atl14,
+              values: atlSpark,
               color: AppColors.bikeSecondary,
             ),
           ),
@@ -288,7 +282,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
           height: 34,
           width: double.infinity,
           child: CustomPaint(
-            painter: _MiniDivergingTsbPainter(values: tsb14),
+            painter: _MiniDivergingTsbPainter(values: tsbSpark),
           ),
         ),
         derivationLine1: 'CTL ($ctlStr) − ATL ($atlStr)',
@@ -611,7 +605,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
                       const SizedBox(width: 10),
                       Text(
                         a.distanceKm > 0
-                            ? '${a.distanceKm.toStringAsFixed(1)} km • ${a.movingTime}'
+                            ? '${UnitFormatter.formatDistance(a.distanceKm, widget.appState.unitSystem, discipline: a.discipline)} • ${a.movingTime}'
                             : a.movingTime,
                         style: AppTypography.telemetrySm,
                       ),
@@ -801,6 +795,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
   }
 
   Widget _buildWeeklyVolumeCard() {
+    final unit = widget.appState.unitSystem;
     final buckets = _computeWeeklyVolumes();
     final isHours = _volumeMetric == 'Hours';
     final total12w = buckets.fold<double>(
@@ -826,7 +821,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
                   Text(
                     isHours
                         ? '12-week total: ${total12w.toStringAsFixed(1)} hrs across Swim, Bike, Run & Strength'
-                        : '12-week total: ${total12w.toStringAsFixed(1)} km across Swim, Bike & Run',
+                        : '12-week total: ${UnitFormatter.formatDistance(total12w, unit)} across Swim, Bike & Run',
                     style: AppTypography.bodySm,
                   ),
                 ],
@@ -854,6 +849,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
           _InteractiveWeeklyVolumeChart(
             buckets: buckets,
             showHours: isHours,
+            unitSystem: unit,
             height: 200,
           ),
           const SizedBox(height: 8),
@@ -934,13 +930,15 @@ class _AnalyticsViewState extends State<AnalyticsView> {
       fastestSwim = validSwims.first;
     }
 
+    final unit = widget.appState.unitSystem;
+
     return [
       _PrEntry(
         sport: 'Running',
         label: 'Fastest ~5K',
         value: pr5k != null ? _formatDurationClock(pr5k.durationSeconds) : '—',
         subtext: pr5k != null
-            ? '${pr5k.distanceKm.toStringAsFixed(2)} km • ${_formatPaceMinPerKm(pr5k.durationSeconds / pr5k.distanceKm)}'
+            ? '${UnitFormatter.formatDistance(pr5k.distanceKm, unit, decimals: 2)} • ${UnitFormatter.formatPaceFromDistanceAndDuration(SportDiscipline.run, pr5k.distanceKm, pr5k.durationSeconds, unit)}'
             : 'No 4.8–5.5 km run synced',
         activity: pr5k,
         color: AppColors.runTertiary,
@@ -950,7 +948,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         label: 'Fastest ~10K',
         value: pr10k != null ? _formatDurationClock(pr10k.durationSeconds) : '—',
         subtext: pr10k != null
-            ? '${pr10k.distanceKm.toStringAsFixed(2)} km • ${_formatPaceMinPerKm(pr10k.durationSeconds / pr10k.distanceKm)}'
+            ? '${UnitFormatter.formatDistance(pr10k.distanceKm, unit, decimals: 2)} • ${UnitFormatter.formatPaceFromDistanceAndDuration(SportDiscipline.run, pr10k.distanceKm, pr10k.durationSeconds, unit)}'
             : 'No 9.7–10.6 km run synced',
         activity: pr10k,
         color: AppColors.runTertiary,
@@ -960,7 +958,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         label: 'Fastest ~Half Marathon',
         value: prHalf != null ? _formatDurationClock(prHalf.durationSeconds) : '—',
         subtext: prHalf != null
-            ? '${prHalf.distanceKm.toStringAsFixed(2)} km • ${_formatPaceMinPerKm(prHalf.durationSeconds / prHalf.distanceKm)}'
+            ? '${UnitFormatter.formatDistance(prHalf.distanceKm, unit, decimals: 2)} • ${UnitFormatter.formatPaceFromDistanceAndDuration(SportDiscipline.run, prHalf.distanceKm, prHalf.durationSeconds, unit)}'
             : 'No 20.5–22 km run synced',
         activity: prHalf,
         color: AppColors.runTertiary,
@@ -968,7 +966,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
       _PrEntry(
         sport: 'Running',
         label: 'Longest Run',
-        value: longestRun != null ? '${longestRun.distanceKm.toStringAsFixed(2)} km' : '—',
+        value: longestRun != null ? UnitFormatter.formatDistance(longestRun.distanceKm, unit, decimals: 2) : '—',
         subtext: longestRun != null ? longestRun.movingTime : 'No runs synced',
         activity: longestRun,
         color: AppColors.runTertiary,
@@ -976,9 +974,9 @@ class _AnalyticsViewState extends State<AnalyticsView> {
       _PrEntry(
         sport: 'Running',
         label: 'Highest Elevation Run',
-        value: highestElevRun != null ? '${highestElevRun.elevationGainM.round()} m' : '—',
+        value: highestElevRun != null ? UnitFormatter.formatElevation(highestElevRun.elevationGainM, unit) : '—',
         subtext: highestElevRun != null
-            ? '${highestElevRun.distanceKm.toStringAsFixed(1)} km'
+            ? UnitFormatter.formatDistance(highestElevRun.distanceKm, unit)
             : 'No elevation data',
         activity: highestElevRun,
         color: AppColors.runTertiary,
@@ -986,7 +984,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
       _PrEntry(
         sport: 'Cycling',
         label: 'Longest Ride',
-        value: longestRide != null ? '${longestRide.distanceKm.toStringAsFixed(1)} km' : '—',
+        value: longestRide != null ? UnitFormatter.formatDistance(longestRide.distanceKm, unit) : '—',
         subtext: longestRide != null ? longestRide.movingTime : 'No rides synced',
         activity: longestRide,
         color: AppColors.bikeSecondary,
@@ -994,9 +992,9 @@ class _AnalyticsViewState extends State<AnalyticsView> {
       _PrEntry(
         sport: 'Cycling',
         label: 'Biggest Climb',
-        value: biggestClimb != null ? '${biggestClimb.elevationGainM.round()} m' : '—',
+        value: biggestClimb != null ? UnitFormatter.formatElevation(biggestClimb.elevationGainM, unit) : '—',
         subtext: biggestClimb != null
-            ? '${biggestClimb.distanceKm.toStringAsFixed(1)} km'
+            ? UnitFormatter.formatDistance(biggestClimb.distanceKm, unit)
             : 'No elevation data',
         activity: biggestClimb,
         color: AppColors.bikeSecondary,
@@ -1006,7 +1004,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         label: 'Best Avg Power Ride',
         value: bestPowerRide != null ? '${bestPowerRide.avgPowerW} W' : '—',
         subtext: bestPowerRide != null
-            ? '${bestPowerRide.distanceKm.toStringAsFixed(1)} km • ${bestPowerRide.movingTime}'
+            ? '${UnitFormatter.formatDistance(bestPowerRide.distanceKm, unit)} • ${bestPowerRide.movingTime}'
             : 'No power meter data',
         activity: bestPowerRide,
         color: AppColors.bikeSecondary,
@@ -1015,10 +1013,15 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         sport: 'Cycling',
         label: 'Fastest Avg Speed Ride',
         value: fastestSpeedRide != null
-            ? '${(fastestSpeedRide.distanceKm / (fastestSpeedRide.durationSeconds / 3600.0)).toStringAsFixed(1)} km/h'
+            ? UnitFormatter.formatPaceFromDistanceAndDuration(
+                SportDiscipline.bike,
+                fastestSpeedRide.distanceKm,
+                fastestSpeedRide.durationSeconds,
+                unit,
+              )
             : '—',
         subtext: fastestSpeedRide != null
-            ? '${fastestSpeedRide.distanceKm.toStringAsFixed(1)} km • ${fastestSpeedRide.movingTime}'
+            ? '${UnitFormatter.formatDistance(fastestSpeedRide.distanceKm, unit)} • ${fastestSpeedRide.movingTime}'
             : 'No rides synced',
         activity: fastestSpeedRide,
         color: AppColors.bikeSecondary,
@@ -1027,7 +1030,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         sport: 'Swimming',
         label: 'Longest Swim',
         value: longestSwim != null
-            ? '${NumberFormat('#,###').format((longestSwim.distanceKm * 1000).round())} m'
+            ? UnitFormatter.formatDistance(longestSwim.distanceKm, unit, discipline: SportDiscipline.swim)
             : '—',
         subtext: longestSwim != null ? longestSwim.movingTime : 'No swims synced',
         activity: longestSwim,
@@ -1037,10 +1040,15 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         sport: 'Swimming',
         label: 'Fastest Avg Pace Swim',
         value: fastestSwim != null
-            ? _formatPacePer100m(fastestSwim.durationSeconds / (fastestSwim.distanceKm * 10.0))
+            ? UnitFormatter.formatPaceFromDistanceAndDuration(
+                SportDiscipline.swim,
+                fastestSwim.distanceKm,
+                fastestSwim.durationSeconds,
+                unit,
+              )
             : '—',
         subtext: fastestSwim != null
-            ? '${(fastestSwim.distanceKm * 1000).round()} m • ${fastestSwim.movingTime}'
+            ? '${UnitFormatter.formatDistance(fastestSwim.distanceKm, unit, discipline: SportDiscipline.swim)} • ${fastestSwim.movingTime}'
             : 'No swims synced',
         activity: fastestSwim,
         color: AppColors.swimPrimary,
@@ -1193,6 +1201,8 @@ class _AnalyticsViewState extends State<AnalyticsView> {
   // 5. PERFORMANCE BY DISTANCE TABLE & BAR VISUAL
   // ---------------------------------------------------------------------------
   List<_DistanceBucketStats> _computeDistanceBuckets(bool isRun) {
+    final unit = widget.appState.unitSystem;
+    final isImperial = unit == UnitSystem.imperial;
     final acts = widget.appState.activities.where((a) {
       if (a.distanceKm <= 0 || a.durationSeconds <= 0) return false;
       return isRun
@@ -1201,19 +1211,34 @@ class _AnalyticsViewState extends State<AnalyticsView> {
     }).toList();
 
     final defs = isRun
-        ? const [
-            ('< 5 km', 0.0, 5.0),
-            ('5 – 10 km', 5.0, 10.0),
-            ('10 – 15 km', 10.0, 15.0),
-            ('15 – 21 km', 15.0, 21.0),
-            ('21+ km', 21.0, double.infinity),
-          ]
-        : const [
-            ('< 25 km', 0.0, 25.0),
-            ('25 – 50 km', 25.0, 50.0),
-            ('50 – 100 km', 50.0, 100.0),
-            ('100+ km', 100.0, double.infinity),
-          ];
+        ? (isImperial
+            ? [
+                ('< 3 mi', 0.0, 3.0 / UnitFormatter.kmToMiles),
+                ('3 – 6 mi', 3.0 / UnitFormatter.kmToMiles, 6.0 / UnitFormatter.kmToMiles),
+                ('6 – 10 mi', 6.0 / UnitFormatter.kmToMiles, 10.0 / UnitFormatter.kmToMiles),
+                ('10 – 13.1 mi', 10.0 / UnitFormatter.kmToMiles, 13.1 / UnitFormatter.kmToMiles),
+                ('13.1+ mi', 13.1 / UnitFormatter.kmToMiles, double.infinity),
+              ]
+            : const [
+                ('< 5 km', 0.0, 5.0),
+                ('5 – 10 km', 5.0, 10.0),
+                ('10 – 15 km', 10.0, 15.0),
+                ('15 – 21 km', 15.0, 21.0),
+                ('21+ km', 21.0, double.infinity),
+              ])
+        : (isImperial
+            ? [
+                ('< 15 mi', 0.0, 15.0 / UnitFormatter.kmToMiles),
+                ('15 – 30 mi', 15.0 / UnitFormatter.kmToMiles, 30.0 / UnitFormatter.kmToMiles),
+                ('30 – 60 mi', 30.0 / UnitFormatter.kmToMiles, 60.0 / UnitFormatter.kmToMiles),
+                ('60+ mi', 60.0 / UnitFormatter.kmToMiles, double.infinity),
+              ]
+            : const [
+                ('< 25 km', 0.0, 25.0),
+                ('25 – 50 km', 25.0, 50.0),
+                ('50 – 100 km', 50.0, 100.0),
+                ('100+ km', 100.0, double.infinity),
+              ]);
 
     return defs.map((def) {
       final (label, minD, maxD) = def;
@@ -1243,8 +1268,8 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         return _DistanceBucketStats(
           label: label,
           count: group.length,
-          avgMetricText: _formatPaceMinPerKm(avgPace),
-          bestMetricText: _formatPaceMinPerKm(bestPace),
+          avgMetricText: _formatRunPace(avgPace, unit),
+          bestMetricText: _formatRunPace(bestPace, unit),
           avgHrText: avgHrText,
         );
       } else {
@@ -1257,8 +1282,8 @@ class _AnalyticsViewState extends State<AnalyticsView> {
         return _DistanceBucketStats(
           label: label,
           count: group.length,
-          avgMetricText: '${avgSpeed.toStringAsFixed(1)} km/h',
-          bestMetricText: '${bestSpeed.toStringAsFixed(1)} km/h',
+          avgMetricText: UnitFormatter.formatPaceOrSpeed(SportDiscipline.bike, avgSpeed / 3.6, unit),
+          bestMetricText: UnitFormatter.formatPaceOrSpeed(SportDiscipline.bike, bestSpeed / 3.6, unit),
           avgHrText: avgHrText,
         );
       }
@@ -1527,7 +1552,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Speed (km/h) ÷ Avg HR × 100 over recent ${isRun ? 'runs' : 'rides'} • Higher = faster at the same heart rate',
+                    'Speed (${UnitFormatter.speedUnitLabel(widget.appState.unitSystem)}) ÷ Avg HR × 100 over recent ${isRun ? 'runs' : 'rides'} • Higher = faster at the same heart rate',
                     style: AppTypography.bodySm,
                   ),
                 ],
@@ -1556,6 +1581,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
               points: pts,
               color: accent,
               isRun: isRun,
+              unitSystem: widget.appState.unitSystem,
               height: 200,
               onSelectActivity: (id) => widget.appState.setSelectedActivityId(id),
             ),
@@ -1592,15 +1618,18 @@ class _AnalyticsViewState extends State<AnalyticsView> {
   }
 
   Widget _buildDisciplineTotalsCard() {
+    final unit = widget.appState.unitSystem;
     final acts = widget.appState.activities;
     final stats = [
       (
         'Running',
+        SportDiscipline.run,
         acts.where((a) => a.discipline == SportDiscipline.run).toList(),
         AppColors.runTertiary,
       ),
       (
         'Cycling',
+        SportDiscipline.bike,
         acts
             .where((a) => a.discipline == SportDiscipline.bike || a.discipline == SportDiscipline.indoorBike)
             .toList(),
@@ -1608,11 +1637,13 @@ class _AnalyticsViewState extends State<AnalyticsView> {
       ),
       (
         'Swimming',
+        SportDiscipline.swim,
         acts.where((a) => a.discipline == SportDiscipline.swim).toList(),
         AppColors.swimPrimary,
       ),
       (
         'Strength',
+        SportDiscipline.strength,
         acts.where((a) => a.discipline == SportDiscipline.strength).toList(),
         AppColors.strengthViolet,
       ),
@@ -1627,7 +1658,7 @@ class _AnalyticsViewState extends State<AnalyticsView> {
           Row(
             children: stats.asMap().entries.map((mapEntry) {
               final isLast = mapEntry.key == stats.length - 1;
-              final (name, list, color) = mapEntry.value;
+              final (name, discipline, list, color) = mapEntry.value;
               final totalKm = list.fold<double>(0, (s, a) => s + a.distanceKm);
               final totalHours = list.fold<double>(0, (s, a) => s + a.durationSeconds) / 3600.0;
               final totalElev = list.fold<double>(0, (s, a) => s + a.elevationGainM);
@@ -1646,13 +1677,15 @@ class _AnalyticsViewState extends State<AnalyticsView> {
                       MacStatusBadge(label: name, color: color),
                       const SizedBox(height: 8),
                       Text(
-                        totalKm > 0 ? '${totalKm.toStringAsFixed(1)} km' : '${list.length} sessions',
+                        totalKm > 0
+                            ? UnitFormatter.formatDistance(totalKm, unit, discipline: discipline)
+                            : '${list.length} sessions',
                         style: AppTypography.telemetryLg,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${totalHours.toStringAsFixed(1)} hrs • ${totalElev.round()} m elev',
+                        '${totalHours.toStringAsFixed(1)} hrs • ${UnitFormatter.formatElevation(totalElev, unit)} elev',
                         style: AppTypography.bodySm,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1831,12 +1864,26 @@ class _MiniDivergingTsbPainter extends CustomPainter {
     );
     if (values.isEmpty) return;
 
-    final maxAbs = math.max(5.0, values.map((v) => v.abs()).reduce(math.max));
-    final slotW = size.width / values.length;
+    // Downsample to at most 28 bars so wider windows (12W/6M/1Y/ALL) stay crisp
+    final List<double> displayValues;
+    if (values.length <= 28) {
+      displayValues = values;
+    } else {
+      const target = 28;
+      displayValues = List.generate(target, (i) {
+        final start = (i * values.length) ~/ target;
+        final end = math.max(start + 1, ((i + 1) * values.length) ~/ target);
+        final slice = values.sublist(start, end);
+        return slice.reduce((a, b) => a + b) / slice.length;
+      });
+    }
+
+    final maxAbs = math.max(5.0, displayValues.map((v) => v.abs()).reduce(math.max));
+    final slotW = size.width / displayValues.length;
     final barW = math.max(2.5, slotW * 0.56);
 
-    for (int i = 0; i < values.length; i++) {
-      final v = values[i];
+    for (int i = 0; i < displayValues.length; i++) {
+      final v = displayValues[i];
       final h = ((v.abs() / maxAbs) * (size.height / 2 - 2)).clamp(1.5, size.height / 2 - 2);
       final left = i * slotW + (slotW - barW) / 2;
       final isPos = v >= 0;
@@ -1929,11 +1976,13 @@ class _AcwrZoneGaugePainter extends CustomPainter {
 class _InteractiveWeeklyVolumeChart extends StatefulWidget {
   final List<_WeeklyVolumeBucket> buckets;
   final bool showHours;
+  final UnitSystem unitSystem;
   final double height;
 
   const _InteractiveWeeklyVolumeChart({
     required this.buckets,
     required this.showHours,
+    required this.unitSystem,
     this.height = 200,
   });
 
@@ -2021,7 +2070,7 @@ class _InteractiveWeeklyVolumeChartState extends State<_InteractiveWeeklyVolumeC
                             Text(
                               widget.showHours
                                   ? '${hovered.totalHrs.toStringAsFixed(1)} hrs • ${hovered.sessions} sessions'
-                                  : '${hovered.totalKm.toStringAsFixed(1)} km • ${hovered.sessions} sessions',
+                                  : '${UnitFormatter.formatDistance(hovered.totalKm, widget.unitSystem)} • ${hovered.sessions} sessions',
                               style: AppTypography.telemetrySm.copyWith(
                                 fontWeight: FontWeight.w700,
                                 color: AppColors.onSurface,
@@ -2032,7 +2081,7 @@ class _InteractiveWeeklyVolumeChartState extends State<_InteractiveWeeklyVolumeC
                               'Run',
                               widget.showHours
                                   ? '${hovered.runHrs.toStringAsFixed(1)} h'
-                                  : '${hovered.runKm.toStringAsFixed(1)} km',
+                                  : UnitFormatter.formatDistance(hovered.runKm, widget.unitSystem),
                               AppColors.runTertiary,
                             ),
                             const SizedBox(height: 2),
@@ -2040,7 +2089,7 @@ class _InteractiveWeeklyVolumeChartState extends State<_InteractiveWeeklyVolumeC
                               'Bike',
                               widget.showHours
                                   ? '${hovered.bikeHrs.toStringAsFixed(1)} h'
-                                  : '${hovered.bikeKm.toStringAsFixed(1)} km',
+                                  : UnitFormatter.formatDistance(hovered.bikeKm, widget.unitSystem),
                               AppColors.bikeSecondary,
                             ),
                             const SizedBox(height: 2),
@@ -2048,7 +2097,11 @@ class _InteractiveWeeklyVolumeChartState extends State<_InteractiveWeeklyVolumeC
                               'Swim',
                               widget.showHours
                                   ? '${hovered.swimHrs.toStringAsFixed(1)} h'
-                                  : '${(hovered.swimKm * 1000).round()} m',
+                                  : UnitFormatter.formatDistance(
+                                      hovered.swimKm,
+                                      widget.unitSystem,
+                                      discipline: SportDiscipline.swim,
+                                    ),
                               AppColors.swimPrimary,
                             ),
                             if (widget.showHours) ...[
@@ -2201,6 +2254,7 @@ class _InteractiveEfficiencyChart extends StatefulWidget {
   final List<_EfficiencyPoint> points;
   final Color color;
   final bool isRun;
+  final UnitSystem unitSystem;
   final double height;
   final ValueChanged<String> onSelectActivity;
 
@@ -2208,6 +2262,7 @@ class _InteractiveEfficiencyChart extends StatefulWidget {
     required this.points,
     required this.color,
     required this.isRun,
+    required this.unitSystem,
     required this.onSelectActivity,
     this.height = 200,
   });
@@ -2218,13 +2273,6 @@ class _InteractiveEfficiencyChart extends StatefulWidget {
 
 class _InteractiveEfficiencyChartState extends State<_InteractiveEfficiencyChart> {
   int? _hoveredIndex;
-
-  String _formatPace(double speedKmh) {
-    if (speedKmh <= 0) return '—';
-    final secPerKm = 3600.0 / speedKmh;
-    final total = secPerKm.round();
-    return '${total ~/ 60}:${(total % 60).toString().padLeft(2, '0')} /km';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -2320,8 +2368,8 @@ class _InteractiveEfficiencyChartState extends State<_InteractiveEfficiencyChart
                               const SizedBox(height: 2),
                               Text(
                                 widget.isRun
-                                    ? '${_formatPace(hovered.speedKmh)} • ${hovered.activity.avgHr} bpm'
-                                    : '${hovered.speedKmh.toStringAsFixed(1)} km/h • ${hovered.activity.avgHr} bpm',
+                                    ? '${UnitFormatter.formatPaceOrSpeed(SportDiscipline.run, hovered.speedKmh / 3.6, widget.unitSystem)} • ${hovered.activity.avgHr} bpm'
+                                    : '${UnitFormatter.formatPaceOrSpeed(SportDiscipline.bike, hovered.speedKmh / 3.6, widget.unitSystem)} • ${hovered.activity.avgHr} bpm',
                                 style: AppTypography.telemetrySm,
                               ),
                             ],

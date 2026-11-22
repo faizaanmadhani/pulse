@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import '../models/performance_metrics.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
@@ -209,7 +209,9 @@ class PmcChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (ctlValues.length < 2) return;
+    if (ctlValues.length < 2 || atlValues.length < 2 || tsbValues.length < 2) {
+      return;
+    }
 
     final gridPaint = Paint()
       ..color = AppColors.borderDivider
@@ -220,29 +222,55 @@ class PmcChartPainter extends CustomPainter {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
     }
 
-    final all = [...ctlValues, ...atlValues, ...tsbValues];
-    final minVal = math.min(0.0, all.reduce(math.min)) - 5;
-    final maxVal = math.max(10.0, all.reduce(math.max)) + 5;
-    final range = (maxVal - minVal).abs() < 1 ? 1.0 : (maxVal - minVal);
+    // Left Y-axis scale: Fitness (CTL) & Fatigue (ATL) from 0 to max * 1.1
+    final loadMaxRaw = math.max(
+      ctlValues.reduce(math.max),
+      atlValues.reduce(math.max),
+    );
+    const double leftMin = 0.0;
+    final double leftMax = math.max(10.0, loadMaxRaw * 1.1);
+    final double leftRange = leftMax - leftMin;
 
-    double yFor(double v) => size.height - ((v - minVal) / range) * size.height;
+    double yForLoad(double v) =>
+        size.height - ((v - leftMin) / leftRange) * size.height;
+
+    // Right Y-axis scale: Form (TSB) symmetric around 0 so 0 baseline sits cleanly in the middle
+    final tsbMinRaw = math.min(0.0, tsbValues.reduce(math.min));
+    final tsbMaxRaw = math.max(0.0, tsbValues.reduce(math.max));
+    final tsbAbsMax = math.max(
+      10.0,
+      math.max(tsbMinRaw.abs(), tsbMaxRaw.abs()) * 1.15,
+    );
+    final double tsbMin = -tsbAbsMax;
+    final double tsbMax = tsbAbsMax;
+    final double tsbRange = tsbMax - tsbMin;
+
+    double yForTsb(double v) =>
+        size.height - ((v - tsbMin) / tsbRange) * size.height;
 
     final dx = size.width / (ctlValues.length - 1);
 
-    // Zero baseline
-    final zeroY = yFor(0);
-    canvas.drawLine(
-      Offset(0, zeroY),
-      Offset(size.width, zeroY),
-      Paint()
-        ..color = AppColors.outline.withOpacity(0.35)
-        ..strokeWidth = 1.0,
-    );
+    // Subtle dashed 0 Form (TSB) baseline
+    final zeroY = yForTsb(0);
+    const dashWidth = 5.0;
+    const dashSpace = 4.0;
+    double startX = 0.0;
+    final zeroPaint = Paint()
+      ..color = AppColors.runTertiary.withOpacity(0.45)
+      ..strokeWidth = 1.0;
+    while (startX < size.width) {
+      canvas.drawLine(
+        Offset(startX, zeroY),
+        Offset(math.min(startX + dashWidth, size.width), zeroY),
+        zeroPaint,
+      );
+      startX += dashWidth + dashSpace;
+    }
 
-    // TSB area fill
+    // TSB area fill anchored to 0 Form baseline
     final tsbFill = Path()..moveTo(0, zeroY);
     for (int i = 0; i < tsbValues.length; i++) {
-      tsbFill.lineTo(i * dx, yFor(tsbValues[i]));
+      tsbFill.lineTo(i * dx, yForTsb(tsbValues[i]));
     }
     tsbFill.lineTo(size.width, zeroY);
     tsbFill.close();
@@ -251,13 +279,21 @@ class PmcChartPainter extends CustomPainter {
       Paint()..color = AppColors.runTertiary.withOpacity(0.12),
     );
 
-    void drawSeries(List<double> data, Color color, double strokeWidth) {
+    void drawSeries(
+      List<double> data,
+      Color color,
+      double strokeWidth,
+      double Function(double) yFor,
+    ) {
       final path = Path();
+      final useLinear = dx < 3.0;
       for (int i = 0; i < data.length; i++) {
         final x = i * dx;
         final y = yFor(data[i]);
         if (i == 0) {
           path.moveTo(x, y);
+        } else if (useLinear) {
+          path.lineTo(x, y);
         } else {
           final prevX = (i - 1) * dx;
           final prevY = yFor(data[i - 1]);
@@ -275,9 +311,64 @@ class PmcChartPainter extends CustomPainter {
       );
     }
 
-    drawSeries(tsbValues, AppColors.runTertiary, 1.6);
-    drawSeries(atlValues, AppColors.bikeSecondary, 2.0);
-    drawSeries(ctlValues, AppColors.swimPrimary, 2.4);
+    drawSeries(tsbValues, AppColors.runTertiary, 1.6, yForTsb);
+    drawSeries(atlValues, AppColors.bikeSecondary, 2.0, yForLoad);
+    drawSeries(ctlValues, AppColors.swimPrimary, 2.4, yForLoad);
+
+    void drawAxisLabel(
+      String text,
+      double y, {
+      bool alignBottom = false,
+      bool alignRight = false,
+      Color? color,
+    }) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: TextStyle(
+            fontSize: 10,
+            color: color ?? AppColors.outline.withOpacity(0.75),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final dy = alignBottom ? (y - tp.height - 2) : (y + 2);
+      final x = alignRight ? (size.width - tp.width - 4) : 4.0;
+      tp.paint(canvas, Offset(x, dy.clamp(0.0, size.height - tp.height)));
+    }
+
+    // Left Y-axis tick labels (CTL / ATL)
+    drawAxisLabel(leftMax.round().toString(), 0);
+    drawAxisLabel(
+      (leftMax / 2).round().toString(),
+      size.height / 2,
+      alignBottom: true,
+    );
+    drawAxisLabel('0', size.height, alignBottom: true);
+
+    // Right Y-axis tick labels (Form TSB)
+    final tsbLabelColor = AppColors.runTertiary.withOpacity(0.8);
+    drawAxisLabel(
+      '+${tsbMax.round()}',
+      0,
+      alignRight: true,
+      color: tsbLabelColor,
+    );
+    drawAxisLabel(
+      '0',
+      zeroY,
+      alignBottom: true,
+      alignRight: true,
+      color: tsbLabelColor,
+    );
+    drawAxisLabel(
+      tsbMin.round().toString(),
+      size.height,
+      alignBottom: true,
+      alignRight: true,
+      color: tsbLabelColor,
+    );
 
     // Interactive crosshair + snapped data dots
     if (hoveredIndex != null && hoveredIndex! >= 0 && hoveredIndex! < ctlValues.length) {
@@ -291,7 +382,7 @@ class PmcChartPainter extends CustomPainter {
           ..strokeWidth = 1.0,
       );
 
-      void drawDot(double value, Color color) {
+      void drawDot(double value, Color color, double Function(double) yFor) {
         final pt = Offset(x, yFor(value));
         canvas.drawCircle(pt, 5.0, Paint()..color = color);
         canvas.drawCircle(
@@ -304,9 +395,9 @@ class PmcChartPainter extends CustomPainter {
         );
       }
 
-      drawDot(tsbValues[i], AppColors.runTertiary);
-      drawDot(atlValues[i], AppColors.bikeSecondary);
-      drawDot(ctlValues[i], AppColors.swimPrimary);
+      drawDot(tsbValues[i], AppColors.runTertiary, yForTsb);
+      drawDot(atlValues[i], AppColors.bikeSecondary, yForLoad);
+      drawDot(ctlValues[i], AppColors.swimPrimary, yForLoad);
     }
   }
 

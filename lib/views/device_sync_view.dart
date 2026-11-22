@@ -72,11 +72,12 @@ class DeviceSyncView extends StatelessWidget {
           Container(
             width: 48,
             height: 48,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               color: appState.isSignedIn
                   ? AppColors.accent.withOpacity(0.14)
                   : AppColors.surfaceLow,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Center(
               child: appState.isSignedIn
@@ -167,9 +168,10 @@ class DeviceSyncView extends StatelessWidget {
           Container(
             width: 48,
             height: 48,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               color: isConnected ? stravaOrange.withOpacity(0.14) : AppColors.surfaceLow,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Center(
               child: Icon(
@@ -310,7 +312,7 @@ class DeviceSyncView extends StatelessWidget {
                     crossAxisCount: cols,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
-                    childAspectRatio: 2.35,
+                    mainAxisExtent: 108,
                   ),
                   itemBuilder: (context, index) => _buildDeviceTile(appState.connectedDevices[index]),
                 );
@@ -323,7 +325,7 @@ class DeviceSyncView extends StatelessWidget {
 
   Widget _buildDeviceTile(ConnectedDevice dev) {
     final isBike = dev.name.toLowerCase().contains('edge') || dev.category.toLowerCase().contains('bike');
-    final icon = isBike ? Icons.directions_bike_rounded : CupertinoIcons.clock;
+    final icon = isBike ? Icons.directions_bike_rounded : Icons.watch_rounded;
     final accent = isBike ? AppColors.bikeSecondary : AppColors.accent;
 
     return Container(
@@ -339,8 +341,17 @@ class DeviceSyncView extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 16, color: accent),
-              const SizedBox(width: 7),
+              Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: accent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(icon, size: 16, color: accent),
+              ),
+              const SizedBox(width: 9),
               Expanded(
                 child: Text(
                   dev.name,

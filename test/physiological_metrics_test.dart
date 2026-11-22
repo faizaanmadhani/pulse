@@ -17,6 +17,8 @@ Activity _makeActivity({
   int? avgPowerW,
   List<GpsPoint> routePoints = const [],
   List<ActivitySplit> splits = const [],
+  List<ZoneBucket>? garminHrZones,
+  List<ZoneBucket>? garminPowerZones,
 }) {
   return Activity(
     id: id,
@@ -42,6 +44,8 @@ Activity _makeActivity({
     calories: 800,
     routePoints: routePoints,
     splits: splits,
+    garminHrZones: garminHrZones,
+    garminPowerZones: garminPowerZones,
   );
 }
 
@@ -144,6 +148,64 @@ void main() {
     test('returns empty list when activity has no HR telemetry', () {
       final activity = _makeActivity(avgHr: 0, maxHr: 0, durationSeconds: 1800);
       expect(computeActivityHrZones(activity), isEmpty);
+    });
+
+    test('handles Unix epoch timeSec timestamps without adding firstTime', () {
+      const baseEpoch = 1770000000.0;
+      final points = <GpsPoint>[
+        const GpsPoint(0, 0, timeSec: baseEpoch, heartRate: 110),
+        const GpsPoint(0, 0, timeSec: baseEpoch + 100, heartRate: 110), // +100s Z1
+        const GpsPoint(0, 0, timeSec: baseEpoch + 300, heartRate: 130), // +200s Z2
+        const GpsPoint(0, 0, timeSec: baseEpoch + 900, heartRate: 170), // dt=600 > 300 ignored
+      ];
+      final activity = _makeActivity(
+        maxHr: 200,
+        durationSeconds: 300,
+        routePoints: points,
+      );
+
+      final zones = computeActivityHrZones(activity);
+      expect(zones, hasLength(5));
+      expect(zones[0].seconds, closeTo(100, 1e-6));
+      expect(zones[1].seconds, closeTo(200, 1e-6));
+      expect(zones[3].seconds, closeTo(0, 1e-6));
+      final totalSec = zones.fold<double>(0, (s, b) => s + b.seconds);
+      expect(totalSec, closeTo(300, 1e-6));
+    });
+
+    test('prefers garminHrZones when non-empty', () {
+      const garminZones = [
+        ZoneBucket(
+          zone: 1,
+          label: 'Recovery',
+          rangeText: '< 132 bpm',
+          seconds: 120,
+          percentage: 20,
+          color: Color(0xFF8E8E93),
+        ),
+        ZoneBucket(
+          zone: 2,
+          label: 'Aerobic',
+          rangeText: '132–148 bpm',
+          seconds: 480,
+          percentage: 80,
+          color: Color(0xFF007AFF),
+        ),
+      ];
+      final activity = _makeActivity(
+        maxHr: 200,
+        durationSeconds: 600,
+        routePoints: const [
+          GpsPoint(0, 0, timeSec: 0, heartRate: 190),
+          GpsPoint(0, 0, timeSec: 100, heartRate: 190),
+        ],
+        garminHrZones: garminZones,
+      );
+
+      final result = computeActivityHrZones(activity);
+      expect(result, same(garminZones));
+      expect(result[0].rangeText, '< 132 bpm');
+      expect(result[1].seconds, 480);
     });
   });
 
@@ -515,6 +577,87 @@ void main() {
       expect(find.text('154 bpm'), findsOneWidget);
       expect(find.text('4:52 /km'), findsOneWidget);
       expect(find.text('4:55 /km'), findsOneWidget);
+    });
+  });
+
+  group('computeActivityPowerZones epoch & Garmin priority', () {
+    test('handles Unix epoch timeSec timestamps without adding firstTime', () {
+      const baseEpoch = 1770000000.0;
+      final points = <GpsPoint>[
+        const GpsPoint(0, 0, timeSec: baseEpoch, powerW: 120),
+        const GpsPoint(0, 0, timeSec: baseEpoch + 150, powerW: 120), // +150s Z1
+        const GpsPoint(0, 0, timeSec: baseEpoch + 350, powerW: 250), // +200s Z4
+      ];
+      final ride = _makeActivity(
+        discipline: SportDiscipline.bike,
+        durationSeconds: 350,
+        routePoints: points,
+      );
+
+      final zones = computeActivityPowerZones(ride, ftpWatts: 250);
+      expect(zones[0].seconds, closeTo(150, 1e-6));
+      expect(zones[3].seconds, closeTo(200, 1e-6));
+      final totalSec = zones.fold<double>(0, (s, b) => s + b.seconds);
+      expect(totalSec, closeTo(350, 1e-6));
+    });
+
+    test('prefers garminPowerZones when non-empty', () {
+      const garminPower = [
+        ZoneBucket(
+          zone: 1,
+          label: 'Active Recovery',
+          rangeText: '< 138 W',
+          seconds: 300,
+          percentage: 100,
+          color: Color(0xFF8E8E93),
+        ),
+      ];
+      final ride = _makeActivity(
+        discipline: SportDiscipline.bike,
+        durationSeconds: 300,
+        avgPowerW: 300,
+        garminPowerZones: garminPower,
+      );
+
+      expect(computeActivityPowerZones(ride, ftpWatts: 250), same(garminPower));
+    });
+  });
+
+  group('parseGarminTimeInZones', () {
+    test('parses HR zones with exact BPM ranges and percentages', () {
+      final parsed = parseGarminTimeInZones([
+        {'zoneNumber': 1, 'secsInZone': 60.0, 'zoneLowBoundary': 100},
+        {'zoneNumber': 2, 'secsInZone': 600.0, 'zoneLowBoundary': 132},
+        {'zoneNumber': 3, 'secsInZone': 300.0, 'zoneLowBoundary': 149},
+        {'zoneNumber': 4, 'secsInZone': 40.0, 'zoneLowBoundary': 165},
+        {'zoneNumber': 5, 'secsInZone': 0.0, 'zoneLowBoundary': 180},
+      ], isPower: false);
+
+      expect(parsed, hasLength(5));
+      expect(parsed[0].label, 'Recovery');
+      expect(parsed[0].rangeText, '< 132 bpm');
+      expect(parsed[0].percentage, closeTo(6.0, 1e-6));
+      expect(parsed[1].label, 'Aerobic');
+      expect(parsed[1].rangeText, '132–148 bpm');
+      expect(parsed[1].percentage, closeTo(60.0, 1e-6));
+      expect(parsed[4].label, 'VO2 Max');
+      expect(parsed[4].rangeText, '180+ bpm');
+    });
+
+    test('parses Power zones with exact Watt ranges', () {
+      final parsed = parseGarminTimeInZones([
+        {'zoneNumber': 1, 'secsInZone': 100.0, 'zoneLowBoundary': 0},
+        {'zoneNumber': 2, 'secsInZone': 200.0, 'zoneLowBoundary': 138},
+        {'zoneNumber': 3, 'secsInZone': 100.0, 'zoneLowBoundary': 188},
+        {'zoneNumber': 4, 'secsInZone': 0.0, 'zoneLowBoundary': 226},
+        {'zoneNumber': 5, 'secsInZone': 0.0, 'zoneLowBoundary': 263},
+      ], isPower: true);
+
+      expect(parsed, hasLength(5));
+      expect(parsed[0].rangeText, '< 138 W');
+      expect(parsed[1].rangeText, '138–187 W');
+      expect(parsed[2].rangeText, '188–225 W');
+      expect(parsed[4].rangeText, '263+ W');
     });
   });
 }

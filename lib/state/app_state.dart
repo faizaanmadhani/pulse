@@ -500,7 +500,27 @@ class AppState extends ChangeNotifier {
         _garminService.fetchDailyStats(activeSession, fetchedProfile.displayName, DateTime.now()),
       ]);
 
-      activities = results[0] as List<Activity>;
+      final freshBatch = results[0] as List<Activity>;
+      final existingById = {for (final a in activities) a.id: a};
+      final mergedFresh = freshBatch.map((a) {
+        final prev = existingById[a.id];
+        if (prev == null) return a;
+        return a.copyWith(
+          splits: a.splits.isEmpty ? prev.splits : a.splits,
+          routePoints: a.routePoints.isEmpty ? prev.routePoints : a.routePoints,
+          deviceHardware: a.deviceHardware.isEmpty ? prev.deviceHardware : a.deviceHardware,
+        );
+      }).toList();
+
+      if (freshBatch.length >= 100 && activities.isNotEmpty) {
+        final freshIds = freshBatch.map((a) => a.id).toSet();
+        final olderCached = activities.where((a) => !freshIds.contains(a.id)).toList();
+        activities = [...mergedFresh, ...olderCached]
+          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      } else {
+        activities = mergedFresh;
+      }
+
       connectedDevices = results[1] as List<ConnectedDevice>;
       final dailyStats = results[2] as GarminDailyStats;
 
@@ -526,7 +546,7 @@ class AppState extends ChangeNotifier {
       _loadedPolylineIds.clear();
       _lastSyncedAt = DateTime.now();
       _backfillGeneration++;
-      _backfillComplete = activities.length < 100;
+      _backfillComplete = freshBatch.length < 100;
       _persistLocalCache();
 
       // Kick off non-blocking background fetch of GPS route polylines for the heatmap
@@ -536,7 +556,7 @@ class AppState extends ChangeNotifier {
       if (!_backfillComplete) {
         _runBackgroundActivityBackfill(
           generation: _backfillGeneration,
-          initialOffset: activities.length,
+          initialOffset: freshBatch.length,
         );
       }
     } on GarminUnauthorizedException {
@@ -596,7 +616,8 @@ class AppState extends ChangeNotifier {
 
         final fresh = batch.where((a) => seenIds.add(a.id)).toList();
         if (fresh.isNotEmpty) {
-          activities = [...activities, ...fresh];
+          activities = [...activities, ...fresh]
+            ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
           final loadStats = TrainingLoadCalculator.computeFromActivities(activities);
           pmcSeries = loadStats.pmcSeries;
           profile = AthletePhysiologicalProfile(
@@ -785,6 +806,30 @@ class AppState extends ChangeNotifier {
           final refreshedIdx = activities.indexWhere((a) => a.id == activityId);
           if (refreshedIdx >= 0 && pts.isNotEmpty) {
             activities[refreshedIdx] = activities[refreshedIdx].copyWith(routePoints: pts);
+          }
+        } catch (_) {
+          // Non-fatal
+        }
+      }
+
+      // Also load Garmin's real HR & Power time-in-zone telemetry if missing
+      final zoneIdx = activities.indexWhere((a) => a.id == activityId);
+      if (zoneIdx >= 0 &&
+          activities[zoneIdx].garminHrZones == null &&
+          activities[zoneIdx].garminPowerZones == null) {
+        try {
+          final zones = await _garminService.fetchActivityTimeInZones(
+            _session!,
+            activityId,
+          );
+          final refreshedIdx = activities.indexWhere((a) => a.id == activityId);
+          if (refreshedIdx >= 0 &&
+              (zones.hrZones.isNotEmpty || zones.powerZones.isNotEmpty)) {
+            activities[refreshedIdx] = activities[refreshedIdx].copyWith(
+              garminHrZones: zones.hrZones.isNotEmpty ? zones.hrZones : null,
+              garminPowerZones:
+                  zones.powerZones.isNotEmpty ? zones.powerZones : null,
+            );
           }
         } catch (_) {
           // Non-fatal

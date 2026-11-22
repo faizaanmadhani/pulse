@@ -173,7 +173,7 @@ class _ActivitiesViewState extends State<ActivitiesView> {
               ),
             )
           else if (_viewMode == 'Feed')
-            _buildStravaStyleFeed(displayed)
+            ActivityFeedGrid(activities: displayed, appState: widget.appState)
           else
             _buildTableView(displayed),
 
@@ -194,35 +194,192 @@ class _ActivitiesViewState extends State<ActivitiesView> {
     );
   }
 
-  Widget _buildStravaStyleFeed(List<Activity> items) {
+  Widget _buildTableView(List<Activity> items) {
+    return MacCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLowest,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              children: [
+                SizedBox(width: 108, child: Text('Sport', style: AppTypography.labelCaps)),
+                Expanded(flex: 3, child: Text('Activity', style: AppTypography.labelCaps)),
+                Expanded(flex: 2, child: Text('Date', style: AppTypography.labelCaps)),
+                Expanded(child: Text('Distance', style: AppTypography.labelCaps)),
+                Expanded(child: Text('Time', style: AppTypography.labelCaps)),
+                Expanded(child: Text('Pace / Speed', style: AppTypography.labelCaps)),
+                Expanded(child: Text('Avg HR', style: AppTypography.labelCaps)),
+                const SizedBox(width: 24),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          ...items.asMap().entries.map((entry) {
+            final isLast = entry.key == items.length - 1;
+            return Column(
+              children: [
+                _buildTableRow(entry.value),
+                if (!isLast) Divider(height: 1, color: AppColors.borderDivider),
+              ],
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTableRow(Activity act) {
+    final (label, color, _) = _sportStyle(act.discipline);
+
+    return InkWell(
+      onTap: () => widget.appState.setSelectedActivityId(act.id),
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 108,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: MacStatusBadge(label: label, color: color),
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.appState.displayTitleFor(act),
+                          style: AppTypography.headlineSm,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (widget.appState.stravaEnrichmentFor(act.id) != null) ...[
+                        const SizedBox(width: 5),
+                        const Icon(
+                          CupertinoIcons.flame_fill,
+                          size: 11,
+                          color: Color(0xFFFC4C02),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (act.location.isNotEmpty)
+                    Text(
+                      act.location,
+                      style: AppTypography.bodySm,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                act.formattedDate.split('•').first.trim(),
+                style: AppTypography.telemetrySm,
+              ),
+            ),
+            Expanded(
+              child: Text(
+                widget.appState.formatActivityDistance(act),
+                style: AppTypography.telemetrySm.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.onSurface,
+                ),
+              ),
+            ),
+            Expanded(child: Text(act.movingTime, style: AppTypography.telemetrySm)),
+            Expanded(
+              child: Text(
+                widget.appState.formatActivityPaceOrSpeed(act),
+                style: AppTypography.telemetrySm.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                act.avgHr > 0 ? '${act.avgHr} bpm' : '—',
+                style: AppTypography.telemetrySm,
+              ),
+            ),
+            SizedBox(
+              width: 24,
+              child: Icon(CupertinoIcons.chevron_right, size: 14, color: AppColors.outline),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  (String, Color, IconData) _sportStyle(SportDiscipline d) => _activitySportStyle(d);
+}
+
+(String, Color, IconData) _activitySportStyle(SportDiscipline d) => switch (d) {
+      SportDiscipline.bike => ('Cycling', AppColors.bikeSecondary, Icons.directions_bike_rounded),
+      SportDiscipline.indoorBike => ('Indoor Bike', AppColors.bikeSecondary, CupertinoIcons.bolt_fill),
+      SportDiscipline.run => ('Run', AppColors.runTertiary, CupertinoIcons.flame_fill),
+      SportDiscipline.swim => ('Swim', AppColors.swimPrimary, CupertinoIcons.drop_fill),
+      SportDiscipline.strength => ('Strength', AppColors.strengthViolet, CupertinoIcons.sportscourt_fill),
+    };
+
+/// Responsive 1- or 2-column Strava-style feed grid of [ActivityFeedCard]s.
+class ActivityFeedGrid extends StatelessWidget {
+  final List<Activity> activities;
+  final AppState appState;
+
+  const ActivityFeedGrid({
+    super.key,
+    required this.activities,
+    required this.appState,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final useTwoColumns = constraints.maxWidth > 1060;
         if (!useTwoColumns) {
           return Column(
-            children: items
+            children: activities
                 .map((act) => Padding(
                       padding: const EdgeInsets.only(bottom: 14),
-                      child: _buildFeedCard(act),
+                      child: ActivityFeedCard(activity: act, appState: appState),
                     ))
                 .toList(),
           );
         }
 
-        // Clean 2-column macOS Strava-style feed grid
         final rows = <Widget>[];
-        for (int i = 0; i < items.length; i += 2) {
-          final left = items[i];
-          final right = i + 1 < items.length ? items[i + 1] : null;
+        for (int i = 0; i < activities.length; i += 2) {
+          final left = activities[i];
+          final right = i + 1 < activities.length ? activities[i + 1] : null;
           rows.add(
             Padding(
               padding: const EdgeInsets.only(bottom: 14),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: _buildFeedCard(left)),
+                  Expanded(child: ActivityFeedCard(activity: left, appState: appState)),
                   const SizedBox(width: 14),
-                  Expanded(child: right != null ? _buildFeedCard(right) : const SizedBox.shrink()),
+                  Expanded(
+                    child: right != null
+                        ? ActivityFeedCard(activity: right, appState: appState)
+                        : const SizedBox.shrink(),
+                  ),
                 ],
               ),
             ),
@@ -232,23 +389,35 @@ class _ActivitiesViewState extends State<ActivitiesView> {
       },
     );
   }
+}
 
-  Widget _buildFeedCard(Activity act) {
-    final (label, color, icon) = _sportStyle(act.discipline);
-    final strava = widget.appState.stravaEnrichmentFor(act.id);
-    final title = widget.appState.displayTitleFor(act);
+/// Reusable Strava-style activity feed card with mini route map, telemetry, and stream sparkline.
+class ActivityFeedCard extends StatelessWidget {
+  final Activity activity;
+  final AppState appState;
+
+  const ActivityFeedCard({
+    super.key,
+    required this.activity,
+    required this.appState,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final act = activity;
+    final (label, color, icon) = _activitySportStyle(act.discipline);
+    final strava = appState.stravaEnrichmentFor(act.id);
+    final title = appState.displayTitleFor(act);
     final desc = (strava?.description?.trim().isNotEmpty == true)
         ? strava!.description!.trim()
         : act.description;
     final hasRoute = act.routePoints.length >= 2;
     final hasHrOrElev = act.routePoints.any((p) => p.heartRate != null || p.elevationM != null);
-
-    // For runs, always show Pace; for rides show Speed (and Power in its own pill)
-    final paceOrSpeed = widget.appState.formatActivityPaceOrSpeed(act);
+    final paceOrSpeed = appState.formatActivityPaceOrSpeed(act);
 
     return InkWell(
-      onTap: () => widget.appState.setSelectedActivityId(act.id),
-      borderRadius: BorderRadius.circular(11),
+      onTap: () => appState.setSelectedActivityId(act.id),
+      borderRadius: BorderRadius.circular(10),
       child: MacCard(
         padding: EdgeInsets.zero,
         child: Column(
@@ -265,6 +434,7 @@ class _ActivitiesViewState extends State<ActivitiesView> {
                       Container(
                         width: 32,
                         height: 32,
+                        alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: color.withOpacity(0.14),
                           borderRadius: BorderRadius.circular(8),
@@ -324,7 +494,7 @@ class _ActivitiesViewState extends State<ActivitiesView> {
                       Expanded(
                         child: _feedMetric(
                           'Distance',
-                          widget.appState.formatActivityDistance(act),
+                          appState.formatActivityDistance(act),
                         ),
                       ),
                       Expanded(
@@ -344,7 +514,7 @@ class _ActivitiesViewState extends State<ActivitiesView> {
                         Expanded(
                           child: _feedMetric(
                             'Elevation',
-                            widget.appState.formatActivityElevation(act.elevationGainM),
+                            appState.formatActivityElevation(act.elevationGainM),
                           ),
                         )
                       else if (act.avgHr > 0)
@@ -553,145 +723,6 @@ class _ActivitiesViewState extends State<ActivitiesView> {
       ],
     );
   }
-
-  Widget _buildTableView(List<Activity> items) {
-    return MacCard(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceLowest,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              children: [
-                SizedBox(width: 108, child: Text('Sport', style: AppTypography.labelCaps)),
-                Expanded(flex: 3, child: Text('Activity', style: AppTypography.labelCaps)),
-                Expanded(flex: 2, child: Text('Date', style: AppTypography.labelCaps)),
-                Expanded(child: Text('Distance', style: AppTypography.labelCaps)),
-                Expanded(child: Text('Time', style: AppTypography.labelCaps)),
-                Expanded(child: Text('Pace / Speed', style: AppTypography.labelCaps)),
-                Expanded(child: Text('Avg HR', style: AppTypography.labelCaps)),
-                const SizedBox(width: 24),
-              ],
-            ),
-          ),
-          const SizedBox(height: 6),
-          ...items.asMap().entries.map((entry) {
-            final isLast = entry.key == items.length - 1;
-            return Column(
-              children: [
-                _buildTableRow(entry.value),
-                if (!isLast) Divider(height: 1, color: AppColors.borderDivider),
-              ],
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTableRow(Activity act) {
-    final (label, color, _) = _sportStyle(act.discipline);
-
-    return InkWell(
-      onTap: () => widget.appState.setSelectedActivityId(act.id),
-      borderRadius: BorderRadius.circular(6),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 108,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: MacStatusBadge(label: label, color: color),
-              ),
-            ),
-            Expanded(
-              flex: 3,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          widget.appState.displayTitleFor(act),
-                          style: AppTypography.headlineSm,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (widget.appState.stravaEnrichmentFor(act.id) != null) ...[
-                        const SizedBox(width: 5),
-                        const Icon(
-                          CupertinoIcons.flame_fill,
-                          size: 11,
-                          color: Color(0xFFFC4C02),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (act.location.isNotEmpty)
-                    Text(
-                      act.location,
-                      style: AppTypography.bodySm,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 2,
-              child: Text(
-                act.formattedDate.split('•').first.trim(),
-                style: AppTypography.telemetrySm,
-              ),
-            ),
-            Expanded(
-              child: Text(
-                widget.appState.formatActivityDistance(act),
-                style: AppTypography.telemetrySm.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.onSurface,
-                ),
-              ),
-            ),
-            Expanded(child: Text(act.movingTime, style: AppTypography.telemetrySm)),
-            Expanded(
-              child: Text(
-                widget.appState.formatActivityPaceOrSpeed(act),
-                style: AppTypography.telemetrySm.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            Expanded(
-              child: Text(
-                act.avgHr > 0 ? '${act.avgHr} bpm' : '—',
-                style: AppTypography.telemetrySm,
-              ),
-            ),
-            SizedBox(
-              width: 24,
-              child: Icon(CupertinoIcons.chevron_right, size: 14, color: AppColors.outline),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  (String, Color, IconData) _sportStyle(SportDiscipline d) => switch (d) {
-        SportDiscipline.bike => ('Cycling', AppColors.bikeSecondary, Icons.directions_bike_rounded),
-        SportDiscipline.indoorBike => ('Indoor Bike', AppColors.bikeSecondary, CupertinoIcons.bolt_fill),
-        SportDiscipline.run => ('Run', AppColors.runTertiary, CupertinoIcons.flame_fill),
-        SportDiscipline.swim => ('Swim', AppColors.swimPrimary, CupertinoIcons.drop_fill),
-        SportDiscipline.strength => ('Strength', AppColors.strengthViolet, CupertinoIcons.sportscourt_fill),
-      };
 }
 
 /// Compact dual-stream sparkline (elevation fill + HR line) shown inside feed cards.

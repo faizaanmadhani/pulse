@@ -194,43 +194,14 @@ class _ActivityDetailViewState extends State<ActivityDetailView> {
             ),
           ),
 
-          // Interactive GPS Route & Pace Heat Map (Large, no overlap with charts)
+          // Interactive GPS Route & Pace Heat Map + Synchronized Telemetry (50/50 desktop split)
           if (activity.routePoints.isNotEmpty ||
               (activity.startLatitude != null && activity.startLongitude != null)) ...[
             const SizedBox(height: 16),
-            MacosHeatmapView(
-              activities: [activity],
-              height: 340,
-              titleOverride: 'Route & Pace Heat Map',
-              showFilterBar: false,
-              colorByPace: true,
-              isImperial: appState.isImperial,
-              highlightedPointIndex: _hoveredRouteIndex,
-              onPointHovered: (idx) {
-                if (idx != _hoveredRouteIndex) {
-                  setState(() => _hoveredRouteIndex = idx);
-                }
-              },
-              isSignedIn: appState.isSignedIn,
-              isLoadingRoutes:
-                  (appState.isLoadingPolylines || appState.isLoadingSplits) &&
-                  activity.routePoints.isEmpty,
-            ),
-          ],
-
-          // Linked intervals.icu-style Synchronized Telemetry Chart Stack (right below map, zero overlap)
-          if (activity.routePoints.length >= 2) ...[
+            _buildMapAndTelemetrySection(),
+          ] else if (ActivityTelemetryStack.hasStreams(activity)) ...[
             const SizedBox(height: 16),
-            ActivityTelemetryStack(
-              activity: activity,
-              hoveredIndex: _hoveredRouteIndex,
-              onHoverIndexChanged: (idx) {
-                if (idx != _hoveredRouteIndex) {
-                  setState(() => _hoveredRouteIndex = idx);
-                }
-              },
-              isImperial: appState.isImperial,
-            ),
+            _buildTelemetryStack(),
           ],
 
           // Heart Rate & Power Time-in-Zone Breakdown + Cardiac Drift (for 60+ min sessions)
@@ -254,6 +225,81 @@ class _ActivityDetailViewState extends State<ActivityDetailView> {
           _buildSplitsCard(unit),
         ],
       ),
+    );
+  }
+
+  Widget _buildMapAndTelemetrySection() {
+    final hasTelemetry = ActivityTelemetryStack.hasStreams(activity);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 960;
+        if (!hasTelemetry) {
+          return _buildRouteMap(height: isWide ? 420 : 340);
+        }
+
+        if (isWide) {
+          final halfWidth = (constraints.maxWidth - 14) / 2;
+          final mapHeight = halfWidth.clamp(480.0, 560.0);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 1,
+                child: _buildRouteMap(height: mapHeight),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                flex: 1,
+                child: _buildTelemetryStack(),
+              ),
+            ],
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildRouteMap(height: 360),
+            const SizedBox(height: 16),
+            _buildTelemetryStack(),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRouteMap({required double height}) {
+    return MacosHeatmapView(
+      activities: [activity],
+      height: height,
+      titleOverride: 'Route & Pace Heat Map',
+      showFilterBar: false,
+      colorByPace: true,
+      isImperial: appState.isImperial,
+      highlightedPointIndex: _hoveredRouteIndex,
+      onPointHovered: (idx) {
+        if (idx != _hoveredRouteIndex) {
+          setState(() => _hoveredRouteIndex = idx);
+        }
+      },
+      isSignedIn: appState.isSignedIn,
+      isLoadingRoutes:
+          (appState.isLoadingPolylines || appState.isLoadingSplits) &&
+          activity.routePoints.isEmpty,
+    );
+  }
+
+  Widget _buildTelemetryStack() {
+    return ActivityTelemetryStack(
+      activity: activity,
+      hoveredIndex: _hoveredRouteIndex,
+      onHoverIndexChanged: (idx) {
+        if (idx != _hoveredRouteIndex) {
+          setState(() => _hoveredRouteIndex = idx);
+        }
+      },
+      isImperial: appState.isImperial,
     );
   }
 
@@ -547,6 +593,15 @@ class _ActivityDetailViewState extends State<ActivityDetailView> {
                       decimals: 2,
                     )
                   : '—';
+              final splitSeconds = _parseSplitDurationSeconds(s.time);
+              final paceStr = (s.distanceKm > 0 && splitSeconds != null && splitSeconds > 0)
+                  ? UnitFormatter.formatPaceFromDistanceAndDuration(
+                      activity.discipline,
+                      s.distanceKm,
+                      splitSeconds,
+                      unit,
+                    )
+                  : s.paceOrSpeed;
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 child: Row(
@@ -565,7 +620,7 @@ class _ActivityDetailViewState extends State<ActivityDetailView> {
                     Expanded(child: Text(s.time, style: AppTypography.telemetrySm)),
                     Expanded(
                       child: Text(
-                        s.paceOrSpeed,
+                        paceStr,
                         style: AppTypography.telemetrySm.copyWith(fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -593,5 +648,24 @@ class _ActivityDetailViewState extends State<ActivityDetailView> {
         ],
       ),
     );
+  }
+
+  /// Parses `mm:ss` or `hh:mm:ss` split time strings into total seconds.
+  double? _parseSplitDurationSeconds(String raw) {
+    final parts = raw.trim().split(':');
+    if (parts.length == 2) {
+      final mins = double.tryParse(parts[0]);
+      final secs = double.tryParse(parts[1]);
+      if (mins == null || secs == null) return null;
+      return mins * 60 + secs;
+    }
+    if (parts.length == 3) {
+      final hrs = double.tryParse(parts[0]);
+      final mins = double.tryParse(parts[1]);
+      final secs = double.tryParse(parts[2]);
+      if (hrs == null || mins == null || secs == null) return null;
+      return hrs * 3600 + mins * 60 + secs;
+    }
+    return null;
   }
 }

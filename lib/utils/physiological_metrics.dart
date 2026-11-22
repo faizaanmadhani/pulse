@@ -99,10 +99,11 @@ String formatZoneDuration(double seconds) {
 /// Computes Z1–Z5 heart rate time-in-zone distribution for a single [activity].
 ///
 /// Priority order for data sources:
-/// 1. `activity.routePoints` (`heartRate` + `timeSec` deltas, or equal-weight if
+/// 1. `activity.garminHrZones` (real Garmin Connect time-in-zone telemetry)
+/// 2. `activity.routePoints` (`heartRate` + `timeSec` deltas, or equal-weight if
 ///    `timeSec` is absent)
-/// 2. `activity.splits` (`avgHr` + parsed `time`)
-/// 3. `activity.avgHr` + effective duration fallback
+/// 3. `activity.splits` (`avgHr` + parsed `time`)
+/// 4. `activity.avgHr` + effective duration fallback
 ///
 /// Uses standard 5-zone %MaxHR bands:
 /// - Z1: <60%
@@ -117,6 +118,10 @@ List<ZoneBucket> computeActivityHrZones(
   Activity activity, {
   int? maxHrOverride,
 }) {
+  if (activity.garminHrZones != null && activity.garminHrZones!.isNotEmpty) {
+    return activity.garminHrZones!;
+  }
+
   final int maxHr = (maxHrOverride != null && maxHrOverride > 0)
       ? maxHrOverride
       : (activity.maxHr > 140 ? activity.maxHr : 190);
@@ -124,44 +129,18 @@ List<ZoneBucket> computeActivityHrZones(
   final zoneSeconds = List<double>.filled(5, 0.0);
   double totalSeconds = 0.0;
 
-  // 1. Route points stream
+  // 2. Route points stream
   final hrPoints = activity.routePoints
       .where((p) => p.heartRate != null && p.heartRate! > 0)
       .toList();
 
   if (hrPoints.isNotEmpty) {
-    final bool hasTimeStream =
-        hrPoints.length >= 2 && hrPoints.every((p) => p.timeSec != null);
-
-    if (hasTimeStream) {
-      final firstTime = hrPoints.first.timeSec!;
-      if (firstTime.isFinite && firstTime > 0) {
-        final z = _hrZoneIndex(hrPoints.first.heartRate!, maxHr);
-        zoneSeconds[z] += firstTime;
-        totalSeconds += firstTime;
-      }
-      for (int i = 1; i < hrPoints.length; i++) {
-        final dt = hrPoints[i].timeSec! - hrPoints[i - 1].timeSec!;
-        if (dt.isFinite && dt > 0) {
-          final z = _hrZoneIndex(hrPoints[i].heartRate!, maxHr);
-          zoneSeconds[z] += dt;
-          totalSeconds += dt;
-        }
-      }
-    }
-
-    // Fallback to equal-weight per point if timeSec was missing or zero-delta
-    if (totalSeconds <= 0) {
-      final duration = _effectiveDurationSeconds(activity);
-      if (duration > 0) {
-        final weight = duration / hrPoints.length;
-        for (final p in hrPoints) {
-          final z = _hrZoneIndex(p.heartRate!, maxHr);
-          zoneSeconds[z] += weight;
-          totalSeconds += weight;
-        }
-      }
-    }
+    totalSeconds = _accumulatePointZones(
+      hrPoints,
+      zoneSeconds,
+      _effectiveDurationSeconds(activity),
+      (p) => _hrZoneIndex(p.heartRate!, maxHr),
+    );
   }
 
   // 2. Fallback to splits
@@ -210,47 +189,27 @@ List<ZoneBucket> computeActivityPowerZones(
   Activity activity, {
   int ftpWatts = 250,
 }) {
+  if (activity.garminPowerZones != null &&
+      activity.garminPowerZones!.isNotEmpty) {
+    return activity.garminPowerZones!;
+  }
+
   final int effectiveFtp = ftpWatts > 0 ? ftpWatts : 250;
   final zoneSeconds = List<double>.filled(5, 0.0);
   double totalSeconds = 0.0;
 
-  // 1. Route points stream
+  // 2. Route points stream
   final powerPoints = activity.routePoints
       .where((p) => p.powerW != null && p.powerW! > 0)
       .toList();
 
   if (powerPoints.isNotEmpty) {
-    final bool hasTimeStream =
-        powerPoints.length >= 2 && powerPoints.every((p) => p.timeSec != null);
-
-    if (hasTimeStream) {
-      final firstTime = powerPoints.first.timeSec!;
-      if (firstTime.isFinite && firstTime > 0) {
-        final z = _powerZoneIndex(powerPoints.first.powerW!, effectiveFtp);
-        zoneSeconds[z] += firstTime;
-        totalSeconds += firstTime;
-      }
-      for (int i = 1; i < powerPoints.length; i++) {
-        final dt = powerPoints[i].timeSec! - powerPoints[i - 1].timeSec!;
-        if (dt.isFinite && dt > 0) {
-          final z = _powerZoneIndex(powerPoints[i].powerW!, effectiveFtp);
-          zoneSeconds[z] += dt;
-          totalSeconds += dt;
-        }
-      }
-    }
-
-    if (totalSeconds <= 0) {
-      final duration = _effectiveDurationSeconds(activity);
-      if (duration > 0) {
-        final weight = duration / powerPoints.length;
-        for (final p in powerPoints) {
-          final z = _powerZoneIndex(p.powerW!, effectiveFtp);
-          zoneSeconds[z] += weight;
-          totalSeconds += weight;
-        }
-      }
-    }
+    totalSeconds = _accumulatePointZones(
+      powerPoints,
+      zoneSeconds,
+      _effectiveDurationSeconds(activity),
+      (p) => _powerZoneIndex(p.powerW!, effectiveFtp),
+    );
   }
 
   // 2. Fallback to splits
@@ -477,9 +436,110 @@ CardiacDriftResult? computeCardiacDrift(
   return null;
 }
 
+/// Parses Garmin Connect's `/hrTimeInZones` or `/powerTimeInZones` JSON array
+/// into a 5-element list of [ZoneBucket]s (Z1–Z5).
+///
+/// Each item is expected to contain `zoneNumber` (1..5), `secsInZone`, and
+/// optionally `zoneLowBoundary`. Returns an empty list if no positive time is
+/// present.
+List<ZoneBucket> parseGarminTimeInZones(
+  List<dynamic> rawZones, {
+  required bool isPower,
+}) {
+  final secsByZone = List<double>.filled(5, 0.0);
+  final lowByZone = List<int?>.filled(5, null);
+
+  for (final item in rawZones) {
+    if (item is! Map) continue;
+    final zoneNum = (item['zoneNumber'] as num?)?.toInt();
+    if (zoneNum == null || zoneNum < 1 || zoneNum > 5) continue;
+    final idx = zoneNum - 1;
+    final secs = (item['secsInZone'] as num?)?.toDouble() ?? 0.0;
+    if (secs.isFinite && secs > 0) {
+      secsByZone[idx] += secs;
+    }
+    final low = (item['zoneLowBoundary'] as num?)?.round();
+    if (low != null && low >= 0) {
+      lowByZone[idx] = low;
+    }
+  }
+
+  final totalSeconds = secsByZone.fold<double>(0.0, (a, b) => a + b);
+  if (totalSeconds <= 0) return const [];
+
+  final labels = isPower ? _powerZoneLabels : _hrZoneLabels;
+  final unit = isPower ? 'W' : 'bpm';
+
+  return List<ZoneBucket>.generate(5, (i) {
+    final sec = secsByZone[i];
+    final pct = (sec / totalSeconds) * 100.0;
+    final low = lowByZone[i];
+    final nextLow = i < 4 ? lowByZone[i + 1] : null;
+
+    final String rangeText;
+    if (i == 0 && nextLow != null && nextLow > 0) {
+      rangeText = '< $nextLow $unit';
+    } else if (i < 4 && low != null && nextLow != null && nextLow > low) {
+      rangeText = '$low–${nextLow - 1} $unit';
+    } else if (low != null) {
+      rangeText = '$low+ $unit';
+    } else {
+      rangeText = 'Z${i + 1}';
+    }
+
+    return ZoneBucket(
+      zone: i + 1,
+      label: labels[i],
+      rangeText: rangeText,
+      seconds: sec,
+      percentage: pct,
+      color: _zoneColors[i],
+    );
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Accumulates relative `timeSec` deltas (`0 < dt <= 300`) across [points] into
+/// [zoneSeconds]. Never adds `points.first.timeSec` directly (which may be a
+/// Unix epoch timestamp). Falls back to equal-weight [fallbackDurationSeconds]
+/// per point when no valid deltas exist.
+double _accumulatePointZones(
+  List<GpsPoint> points,
+  List<double> zoneSeconds,
+  double fallbackDurationSeconds,
+  int Function(GpsPoint point) zoneForPoint,
+) {
+  if (points.isEmpty) return 0.0;
+  double totalSeconds = 0.0;
+
+  final bool hasTimeStream =
+      points.length >= 2 && points.every((p) => p.timeSec != null);
+
+  if (hasTimeStream) {
+    for (int i = 1; i < points.length; i++) {
+      final dt = points[i].timeSec! - points[i - 1].timeSec!;
+      if (dt.isFinite && dt > 0 && dt <= 300) {
+        final z = zoneForPoint(points[i]);
+        zoneSeconds[z] += dt;
+        totalSeconds += dt;
+      }
+    }
+  }
+
+  if (totalSeconds <= 0 && fallbackDurationSeconds > 0) {
+    final weight = fallbackDurationSeconds / points.length;
+    for (final p in points) {
+      final z = zoneForPoint(p);
+      zoneSeconds[z] += weight;
+      totalSeconds += weight;
+    }
+  }
+
+  return totalSeconds;
+}
 
 class _SplitSpeedSample {
   final double hr;

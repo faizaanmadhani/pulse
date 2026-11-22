@@ -34,6 +34,7 @@ class NavigationSidebar extends StatelessWidget {
                 Container(
                   width: 26,
                   height: 26,
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: AppColors.accent,
                     borderRadius: BorderRadius.circular(7),
@@ -46,16 +47,7 @@ class NavigationSidebar extends StatelessWidget {
                 ),
                 const SizedBox(width: 9),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Pulse Training', style: AppTypography.headlineSm),
-                      Text(
-                        'Garmin Connect',
-                        style: AppTypography.bodySm.copyWith(fontSize: 10.5),
-                      ),
-                    ],
-                  ),
+                  child: Text('Pulse', style: AppTypography.headlineSm),
                 ),
               ],
             ),
@@ -253,24 +245,27 @@ class NavigationSidebar extends StatelessWidget {
 
   Widget _buildAccountFooter(BuildContext context) {
     final profile = appState.userProfile;
-    return Container(
-      margin: const EdgeInsets.all(10),
+    return Padding(
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainer,
-        borderRadius: BorderRadius.circular(9),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: InkWell(
-        onTap: () {
-          if (appState.isSignedIn) {
-            appState.setNavIndex(5);
-          } else {
-            showGarminSignInDialog(context, appState);
-          }
-        },
-        borderRadius: BorderRadius.circular(7),
-        child: Row(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            if (appState.isSignedIn) {
+              appState.setNavIndex(5);
+            } else {
+              showGarminSignInDialog(context, appState);
+            }
+          },
+          borderRadius: BorderRadius.circular(9),
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainer,
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: AppColors.borderSubtle),
+            ),
+            child: Row(
           children: [
             Container(
               width: 30,
@@ -333,6 +328,8 @@ class NavigationSidebar extends StatelessWidget {
             ),
             Icon(CupertinoIcons.chevron_right, size: 13, color: AppColors.outline),
           ],
+        ),
+      ),
         ),
       ),
     );
