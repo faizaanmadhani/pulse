@@ -1139,18 +1139,22 @@ class TrainingLoadCalculator {
     }
 
     final today = now ?? DateTime.now();
-    final endDay = DateTime(today.year, today.month, today.day);
+    // Use UTC midnight calendar dates for all day keys & iteration so DST transitions
+    // (23h / 25h local days) NEVER shift midnight keys and drop activities.
+    final endDay = DateTime.utc(today.year, today.month, today.day);
 
     final dailyLoad = <DateTime, double>{};
     DateTime? earliestActivityDay;
     for (final act in activities) {
-      final d = DateTime(act.timestamp.year, act.timestamp.month, act.timestamp.day);
+      final d = DateTime.utc(act.timestamp.year, act.timestamp.month, act.timestamp.day);
       if (d.isAfter(endDay)) continue;
       if (earliestActivityDay == null || d.isBefore(earliestActivityDay)) {
         earliestActivityDay = d;
       }
       // Use Garmin TSS / training load if present; otherwise estimate from duration (hours * 50)
-      final load = act.tss ?? ((act.durationSeconds / 3600.0) * 50.0);
+      final load = (act.tss != null && act.tss! > 0)
+          ? act.tss!
+          : ((act.durationSeconds / 3600.0) * 50.0);
       dailyLoad[d] = (dailyLoad[d] ?? 0.0) + load;
     }
 
@@ -1171,14 +1175,14 @@ class TrainingLoadCalculator {
     final series = <PmcDataPoint>[];
 
     for (int i = 0; i < totalDays; i++) {
-      final day = startDay.add(Duration(days: i));
-      final tss = dailyLoad[day] ?? 0.0;
+      final utcDay = startDay.add(Duration(days: i));
+      final tss = dailyLoad[utcDay] ?? 0.0;
       ctl = ctl + (tss - ctl) / 42.0;
       atl = atl + (tss - atl) / 7.0;
       final tsb = ctl - atl;
       series.add(
         PmcDataPoint(
-          date: day,
+          date: DateTime(utcDay.year, utcDay.month, utcDay.day),
           ctl: double.parse(ctl.toStringAsFixed(1)),
           atl: double.parse(atl.toStringAsFixed(1)),
           tsb: double.parse(tsb.toStringAsFixed(1)),
