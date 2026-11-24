@@ -42,18 +42,23 @@ class _TopHudState extends State<TopHud> {
   }
 
   String get _sectionTitle {
+    if (widget.appState.selectedPlannedWorkout != null) {
+      return 'Workout Details';
+    }
     switch (widget.appState.currentNavIndex) {
       case 0:
         return 'Dashboard';
       case 1:
         return 'Calendar';
       case 2:
-        return 'Analytics';
+        return 'Training Plan';
       case 3:
-        return widget.appState.selectedActivityId != null ? 'Activity Details' : 'Activities';
+        return 'Analytics';
       case 4:
-        return 'Strength';
+        return widget.appState.selectedActivityId != null ? 'Activity Details' : 'Activities';
       case 5:
+        return 'Strength';
+      case 6:
         return 'Garmin & Devices';
       default:
         return 'Dashboard';

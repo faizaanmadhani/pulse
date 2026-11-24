@@ -285,6 +285,7 @@ class MacEmptyState extends StatelessWidget {
   final String title;
   final String message;
   final String? actionLabel;
+  final IconData? actionIcon;
   final VoidCallback? onAction;
 
   const MacEmptyState({
@@ -293,6 +294,7 @@ class MacEmptyState extends StatelessWidget {
     required this.title,
     required this.message,
     this.actionLabel,
+    this.actionIcon,
     this.onAction,
   });
 
@@ -331,7 +333,8 @@ class MacEmptyState extends StatelessWidget {
                 const SizedBox(height: 18),
                 MacPushButton(
                   label: actionLabel!,
-                  icon: CupertinoIcons.person_crop_circle_badge_checkmark,
+                  icon: actionIcon ??
+                      CupertinoIcons.person_crop_circle_badge_checkmark,
                   isPrimary: true,
                   onPressed: onAction,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

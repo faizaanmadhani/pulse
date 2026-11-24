@@ -4,6 +4,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
 import '../state/app_state.dart';
 import '../models/device_status.dart';
+import '../components/chatgpt_connect_dialog.dart';
 import '../components/garmin_sign_in_dialog.dart';
 import '../components/gear_tracker_card.dart';
 import '../components/strava_connect_dialog.dart';
@@ -28,6 +29,11 @@ class DeviceSyncView extends StatelessWidget {
 
           // Strava Account & Activity Enrichment Card
           _buildStravaAccountCard(context),
+
+          const SizedBox(height: 16),
+
+          // ChatGPT Account & AI Coach Card
+          _buildChatGptAccountCard(context),
 
           const SizedBox(height: 16),
 
@@ -256,6 +262,105 @@ class DeviceSyncView extends StatelessWidget {
                   initialError: appState.stravaError,
                 );
               },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChatGptAccountCard(BuildContext context) {
+    const chatGptTeal = ChatGptConnectDialog.chatGptTeal;
+    final session = appState.chatGptSession;
+    final isConnected = appState.isChatGptConnected;
+    final displayName = session?.userName?.trim();
+    final email = session?.userEmail?.trim();
+    final tier = session?.planTier?.trim();
+
+    return MacCard(
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: isConnected
+                  ? chatGptTeal.withOpacity(0.14)
+                  : AppColors.surfaceLow,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Center(
+              child: Icon(
+                CupertinoIcons.sparkles,
+                size: 24,
+                color: isConnected ? chatGptTeal : AppColors.outline,
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        isConnected
+                            ? (displayName != null && displayName.isNotEmpty
+                                ? 'ChatGPT • $displayName'
+                                : 'ChatGPT Coach')
+                            : 'ChatGPT Coach',
+                        style: AppTypography.headlineMd,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    MacStatusBadge(
+                      label: isConnected ? 'Connected' : 'Not Connected',
+                      color: isConnected ? chatGptTeal : AppColors.outline,
+                    ),
+                    if (isConnected && tier != null && tier.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      MacStatusBadge(
+                        label: tier.toUpperCase(),
+                        color: AppColors.accent,
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  isConnected
+                      ? '${email != null && email.isNotEmpty ? '$email • ' : ''}OAuth Client ID: ${session!.clientId}'
+                      : 'Sign in with ChatGPT (OAuth 2.0 + PKCE) to generate and adapt personalized triathlon training plans. Client ID required on connect.',
+                  style: AppTypography.bodySm,
+                ),
+                if (appState.chatGptError != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    appState.chatGptError!,
+                    style: AppTypography.bodySm.copyWith(color: AppColors.error),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          if (isConnected)
+            MacPushButton(
+              label: 'Disconnect',
+              isDestructive: true,
+              onPressed: () => appState.disconnectChatGpt(),
+            )
+          else
+            MacPushButton(
+              label: 'Connect ChatGPT',
+              icon: CupertinoIcons.sparkles,
+              isPrimary: true,
+              onPressed: () => showChatGptConnectDialog(context, appState),
             ),
         ],
       ),

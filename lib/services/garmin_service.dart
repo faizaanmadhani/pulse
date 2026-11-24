@@ -1002,6 +1002,173 @@ class GarminService {
     );
   }
 
+  /// Creates a structured workout template in Garmin Connect `workout-service`
+  /// and returns its created `workoutId`.
+  Future<String> createWorkout(
+    GarminSession session,
+    Map<String, dynamic> workoutPayload,
+  ) async {
+    final uri = Uri.parse(
+      'https://connectapi.${session.domain}/workout-service/workout',
+    );
+    final res = await _client
+        .post(
+          uri,
+          headers: {
+            ..._apiHeaders(session),
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(workoutPayload),
+        )
+        .timeout(_timeout);
+
+    if (res.statusCode == 401) {
+      throw const GarminUnauthorizedException();
+    }
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw GarminAuthException(
+        'Failed to create Garmin workout (HTTP ${res.statusCode}).',
+      );
+    }
+
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(res.body);
+    } catch (_) {
+      throw const GarminAuthException(
+        'Garmin createWorkout response was not valid JSON.',
+      );
+    }
+
+    final workoutId = decoded is Map
+        ? decoded['workoutId']?.toString().trim()
+        : (decoded is num || decoded is String
+            ? decoded.toString().trim()
+            : null);
+
+    if (workoutId == null || workoutId.isEmpty) {
+      throw const GarminAuthException(
+        'Garmin createWorkout response was missing workoutId.',
+      );
+    }
+    return workoutId;
+  }
+
+  /// Schedules an existing Garmin workout ([workoutId]) on [date] (`YYYY-MM-DD`)
+  /// and returns its `workoutScheduleId`.
+  Future<String> scheduleWorkout(
+    GarminSession session,
+    String workoutId,
+    DateTime date,
+  ) async {
+    final trimmedId = workoutId.trim();
+    if (trimmedId.isEmpty) {
+      throw const GarminAuthException(
+        'Workout ID is required to schedule a Garmin workout.',
+      );
+    }
+
+    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    final uri = Uri.parse(
+      'https://connectapi.${session.domain}/workout-service/schedule/$trimmedId',
+    );
+    final res = await _client
+        .post(
+          uri,
+          headers: {
+            ..._apiHeaders(session),
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'date': dateStr}),
+        )
+        .timeout(_timeout);
+
+    if (res.statusCode == 401) {
+      throw const GarminUnauthorizedException();
+    }
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw GarminAuthException(
+        'Failed to schedule Garmin workout (HTTP ${res.statusCode}).',
+      );
+    }
+
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(res.body);
+    } catch (_) {
+      throw const GarminAuthException(
+        'Garmin scheduleWorkout response was not valid JSON.',
+      );
+    }
+
+    final scheduleId = decoded is Map
+        ? (decoded['workoutScheduleId'] ??
+                decoded['scheduleId'] ??
+                decoded['id'])
+            ?.toString()
+            .trim()
+        : (decoded is num || decoded is String
+            ? decoded.toString().trim()
+            : null);
+
+    if (scheduleId == null || scheduleId.isEmpty) {
+      throw const GarminAuthException(
+        'Garmin scheduleWorkout response was missing workoutScheduleId.',
+      );
+    }
+    return scheduleId;
+  }
+
+  /// Deletes a scheduled workout entry and/or its underlying workout template
+  /// from Garmin Connect. 404 responses are treated as idempotent no-ops.
+  Future<void> deleteScheduledWorkout(
+    GarminSession session, {
+    String? scheduleId,
+    String? workoutId,
+  }) async {
+    final trimmedScheduleId = scheduleId?.trim() ?? '';
+    final trimmedWorkoutId = workoutId?.trim() ?? '';
+    if (trimmedScheduleId.isEmpty && trimmedWorkoutId.isEmpty) {
+      return;
+    }
+
+    if (trimmedScheduleId.isNotEmpty) {
+      final scheduleUri = Uri.parse(
+        'https://connectapi.${session.domain}/workout-service/schedule/$trimmedScheduleId',
+      );
+      final res = await _client
+          .delete(scheduleUri, headers: _apiHeaders(session))
+          .timeout(_timeout);
+      if (res.statusCode == 401) {
+        throw const GarminUnauthorizedException();
+      }
+      if (res.statusCode != 404 &&
+          (res.statusCode < 200 || res.statusCode >= 300)) {
+        throw GarminAuthException(
+          'Failed to delete scheduled Garmin workout (HTTP ${res.statusCode}).',
+        );
+      }
+    }
+
+    if (trimmedWorkoutId.isNotEmpty) {
+      final workoutUri = Uri.parse(
+        'https://connectapi.${session.domain}/workout-service/workout/$trimmedWorkoutId',
+      );
+      final res = await _client
+          .delete(workoutUri, headers: _apiHeaders(session))
+          .timeout(_timeout);
+      if (res.statusCode == 401) {
+        throw const GarminUnauthorizedException();
+      }
+      if (res.statusCode != 404 &&
+          (res.statusCode < 200 || res.statusCode >= 300)) {
+        throw GarminAuthException(
+          'Failed to delete Garmin workout (HTTP ${res.statusCode}).',
+        );
+      }
+    }
+  }
+
   /// Parses a Garmin Connect activity summary JSON object into our [Activity] model.
   Activity _parseGarminActivity(Map<String, dynamic> json) {
     final activityId = (json['activityId'] ?? '').toString();

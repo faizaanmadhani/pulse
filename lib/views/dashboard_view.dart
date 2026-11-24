@@ -5,6 +5,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
 import '../state/app_state.dart';
 import '../models/activity.dart';
+import '../models/training_plan.dart';
 import '../utils/unit_formatter.dart';
 import '../components/chart_painters.dart';
 import '../components/garmin_sign_in_dialog.dart';
@@ -19,6 +20,8 @@ class DashboardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final upNext = _selectTodayOrUpNextWorkout();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -32,6 +35,11 @@ class DashboardView extends StatelessWidget {
           if (appState.isSignedIn && appState.syncError != null) ...[
             _buildSyncErrorBanner(),
             const SizedBox(height: 14),
+          ],
+
+          if (upNext != null) ...[
+            _buildTodayOrUpNextCard(context, upNext),
+            const SizedBox(height: 16),
           ],
 
           // Row 1: Hero 3-Card Strip (Race Targets, Physiological Readiness & ACWR, Garmin Health Indices)
@@ -657,7 +665,7 @@ class DashboardView extends StatelessWidget {
       meta: appState.isSignedIn
           ? '${UnitFormatter.formatElevation(runs.fold<double>(0, (s, a) => s + a.elevationGainM), unit)} elev'
           : '—',
-      onTap: () => appState.setNavIndex(3),
+      onTap: () => appState.setNavIndex(4),
     );
 
     final bikeCard = _buildSportCard(
@@ -671,7 +679,7 @@ class DashboardView extends StatelessWidget {
       meta: appState.isSignedIn
           ? '${UnitFormatter.formatElevation(bikes.fold<double>(0, (s, a) => s + a.elevationGainM), unit)} elev'
           : '—',
-      onTap: () => appState.setNavIndex(3),
+      onTap: () => appState.setNavIndex(4),
     );
 
     final swimCard = _buildSportCard(
@@ -683,7 +691,7 @@ class DashboardView extends StatelessWidget {
           ? '30d: ${UnitFormatter.formatDistance(swims.fold<double>(0, (s, a) => s + a.distanceKm), unit, discipline: SportDiscipline.swim)} • ${swims.length} sessions'
           : '7d & 30d pool / open water',
       meta: appState.isSignedIn ? fmtDuration(swims) : '—',
-      onTap: () => appState.setNavIndex(3),
+      onTap: () => appState.setNavIndex(4),
     );
 
     final strengthCard = _buildSportCard(
@@ -697,7 +705,7 @@ class DashboardView extends StatelessWidget {
       meta: appState.isSignedIn
           ? '${strengths.fold<int>(0, (s, a) => s + a.calories)} kcal'
           : '—',
-      onTap: () => appState.setNavIndex(4),
+      onTap: () => appState.setNavIndex(5),
     );
 
     // Compact 2x2 grid in exact order: Running, Cycling, Swimming, Strength
@@ -983,7 +991,7 @@ class DashboardView extends StatelessWidget {
             Text('Recent Activities', style: AppTypography.headlineMd),
             if (appState.activities.isNotEmpty)
               InkWell(
-                onTap: () => appState.setNavIndex(3),
+                onTap: () => appState.setNavIndex(4),
                 borderRadius: BorderRadius.circular(5),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -1019,5 +1027,319 @@ class DashboardView extends StatelessWidget {
           ActivityFeedGrid(activities: recent, appState: appState),
       ],
     );
+  }
+
+  ({PlannedWorkout workout, bool isToday, DateTime date, int sameDayCount})?
+      _selectTodayOrUpNextWorkout() {
+    final plan = appState.activeTrainingPlan;
+    if (plan == null) return null;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final candidates = <({int index, PlannedWorkout workout, DateTime date})>[];
+    final all = plan.allWorkouts;
+    for (var i = 0; i < all.length; i++) {
+      final w = all[i];
+      if (w.status == WorkoutStatus.skipped) continue;
+      if (w.archetype == WorkoutArchetype.rest) continue;
+      final d = w.scheduledDate;
+      if (d == null || d.isBefore(today)) continue;
+      candidates.add((index: i, workout: w, date: d));
+    }
+
+    if (candidates.isEmpty) return null;
+
+    int statusRank(WorkoutStatus s) =>
+        s == WorkoutStatus.scheduled ? 0 : 1;
+
+    candidates.sort((a, b) {
+      final dateCmp = a.date.compareTo(b.date);
+      if (dateCmp != 0) return dateCmp;
+      final statusCmp =
+          statusRank(a.workout.status).compareTo(statusRank(b.workout.status));
+      if (statusCmp != 0) return statusCmp;
+      return a.index.compareTo(b.index);
+    });
+
+    final best = candidates.first;
+    final isToday = best.date.year == today.year &&
+        best.date.month == today.month &&
+        best.date.day == today.day;
+    final sameDayCount =
+        candidates.where((c) => c.date == best.date).length;
+
+    return (
+      workout: best.workout,
+      isToday: isToday,
+      date: best.date,
+      sameDayCount: sameDayCount,
+    );
+  }
+
+  Widget _buildTodayOrUpNextCard(
+    BuildContext context,
+    ({PlannedWorkout workout, bool isToday, DateTime date, int sameDayCount}) info,
+  ) {
+    final w = info.workout;
+    final isToday = info.isToday;
+    final date = info.date;
+    final now = DateTime.now();
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    final isTomorrow = date.year == tomorrow.year &&
+        date.month == tomorrow.month &&
+        date.day == tomorrow.day;
+
+    final (sportLabel, sportColor, sportIcon) =
+        _plannedSportMeta(w.discipline);
+    final (archetypeLabel, archetypeColor) = _archetypeMeta(w.archetype);
+    final isGarminSynced =
+        w.isSyncedToGarmin || (w.brickRunLeg?.isSyncedToGarmin ?? false);
+    final adh = w.adherencePercent;
+    final hasValidAdherence = adh != null && adh.isFinite && adh >= 0;
+    final distKm = w.estimatedDistanceKm;
+    final hasDist = distKm != null && distKm.isFinite && distKm > 0;
+    final tss = w.estimatedTss;
+    final hasTss = tss != null && tss.isFinite && tss > 0;
+    final zp = w.zwiftPrescription;
+    final leg = w.brickRunLeg;
+
+    final dateFormatted = DateFormat('EEE, MMM d').format(date);
+    final dateLabel = isToday
+        ? 'Today • $dateFormatted'
+        : (isTomorrow ? 'Tomorrow • $dateFormatted' : dateFormatted);
+
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        key: const ValueKey('dashboard_today_up_next_card'),
+        onTap: () => appState.selectPlannedWorkout(w),
+        borderRadius: BorderRadius.circular(10),
+        child: MacCard(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        MacStatusBadge(
+                          label: isToday ? 'TODAY' : 'UP NEXT',
+                          color: isToday ? AppColors.runTertiary : AppColors.accent,
+                        ),
+                        Text(
+                          dateLabel,
+                          style: AppTypography.bodySm.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.onSurfaceVariant,
+                          ),
+                        ),
+                        MacStatusBadge(
+                          label: sportLabel,
+                          color: sportColor,
+                          icon: sportIcon,
+                        ),
+                        MacStatusBadge(
+                          label: archetypeLabel,
+                          color: archetypeColor,
+                        ),
+                        if (isGarminSynced)
+                          MacStatusBadge(
+                            label: 'Synced to Garmin',
+                            color: AppColors.runTertiary,
+                            icon: CupertinoIcons.checkmark_shield_fill,
+                          ),
+                        if (w.status == WorkoutStatus.completed) ...[
+                          MacStatusBadge(
+                            label: 'Completed',
+                            color: AppColors.runTertiary,
+                            icon: CupertinoIcons.checkmark_circle_fill,
+                          ),
+                          if (hasValidAdherence)
+                            MacStatusBadge(
+                              label: '${adh.clamp(0.0, 100.0).round()}%',
+                              color: adh >= 85
+                                  ? AppColors.runTertiary
+                                  : AppColors.bikeSecondary,
+                            ),
+                        ],
+                        if (info.sameDayCount > 1)
+                          Text(
+                            '+${info.sameDayCount - 1} more ${isToday ? 'today' : 'that day'}',
+                            style: AppTypography.bodySm.copyWith(
+                              color: AppColors.outline,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'View Workout',
+                        style: AppTypography.bodySm.copyWith(
+                          color: AppColors.accent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        CupertinoIcons.chevron_right,
+                        size: 13,
+                        color: AppColors.accent,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: sportColor.withOpacity(AppColors.isDark ? 0.22 : 0.13),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(sportIcon, size: 19, color: sportColor),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          w.title,
+                          style: AppTypography.headlineMd,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 5),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              _formatMinutes(w.estimatedDurationMinutes),
+                              style: AppTypography.telemetrySm.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.onSurface,
+                              ),
+                            ),
+                            if (hasDist)
+                              Text(
+                                UnitFormatter.formatDistance(
+                                  distKm,
+                                  appState.unitSystem,
+                                  discipline: w.discipline,
+                                  decimals: w.discipline == SportDiscipline.swim ? 0 : 1,
+                                ),
+                                style: AppTypography.telemetrySm.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.onSurfaceVariant,
+                                ),
+                              ),
+                            if (hasTss)
+                              Text(
+                                '${tss.round()} TSS',
+                                style: AppTypography.telemetrySm.copyWith(
+                                  color: AppColors.onSurfaceVariant,
+                                ),
+                              ),
+                            if (zp != null) ...[
+                              Text(
+                                'Zwift: ${zp.difficulty} • ${zp.durationMinutes} min • ${zp.targetTss} TSS',
+                                style: AppTypography.bodySm.copyWith(
+                                  color: AppColors.bikeSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (zp.suggestedSearchTerms.isNotEmpty)
+                                MacStatusBadge(
+                                  label: zp.suggestedSearchTerms.first,
+                                  color: AppColors.bikeSecondary,
+                                ),
+                            ],
+                            if (w.archetype == WorkoutArchetype.brick && leg != null)
+                              MacStatusBadge(
+                                label: 'T2 -> ${leg.estimatedDurationMinutes}m Run (<=30m)',
+                                color: AppColors.runTertiary,
+                                icon: CupertinoIcons.arrow_right_circle_fill,
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _formatMinutes(int minutes) {
+    if (minutes <= 0) return '0 min';
+    if (minutes < 60) return '$minutes min';
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    return m == 0 ? '${h}h' : '${h}h ${m}m';
+  }
+
+  static (String, Color, IconData) _plannedSportMeta(SportDiscipline d) {
+    return switch (d) {
+      SportDiscipline.run => (
+          'Run',
+          AppColors.runTertiary,
+          CupertinoIcons.flame,
+        ),
+      SportDiscipline.swim => (
+          'Swim',
+          AppColors.swimPrimary,
+          CupertinoIcons.drop_fill,
+        ),
+      SportDiscipline.bike => (
+          'Bike',
+          AppColors.bikeSecondary,
+          CupertinoIcons.speedometer,
+        ),
+      SportDiscipline.indoorBike => (
+          'Indoor Bike',
+          AppColors.bikeSecondary,
+          CupertinoIcons.bolt_fill,
+        ),
+      SportDiscipline.strength => (
+          'Strength',
+          AppColors.strengthViolet,
+          CupertinoIcons.sportscourt,
+        ),
+    };
+  }
+
+  static (String, Color) _archetypeMeta(WorkoutArchetype a) {
+    return switch (a) {
+      WorkoutArchetype.intervals => ('Intervals', AppColors.error),
+      WorkoutArchetype.threshold => ('Threshold', AppColors.bikeSecondary),
+      WorkoutArchetype.easy => ('Easy', AppColors.runTertiary),
+      WorkoutArchetype.long => ('Long', AppColors.accent),
+      WorkoutArchetype.zwiftRide => ('Zwift', AppColors.bikeSecondary),
+      WorkoutArchetype.brick => ('Brick', AppColors.strengthViolet),
+      WorkoutArchetype.strength => ('Strength', AppColors.strengthViolet),
+      WorkoutArchetype.rest => ('Rest', AppColors.outline),
+    };
   }
 }

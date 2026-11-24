@@ -5,6 +5,8 @@ import 'components/top_hud.dart';
 import 'components/navigation_sidebar.dart';
 import 'views/dashboard_view.dart';
 import 'views/calendar_view.dart';
+import 'views/training_plan_view.dart';
+import 'views/scheduled_workout_detail_view.dart';
 import 'views/analytics_view.dart';
 import 'views/activities_view.dart';
 import 'views/strength_view.dart';
@@ -93,18 +95,28 @@ class _PulseTrainingAppState extends State<PulseTrainingApp> {
   }
 
   Widget _buildActiveView(int index) {
+    final selectedPlannedWorkout = _appState.selectedPlannedWorkout;
+    if (selectedPlannedWorkout != null) {
+      return ScheduledWorkoutDetailView(
+        workout: selectedPlannedWorkout,
+        appState: _appState,
+      );
+    }
+
     switch (index) {
       case 0:
         return DashboardView(appState: _appState);
       case 1:
         return CalendarView(appState: _appState);
       case 2:
-        return AnalyticsView(appState: _appState);
+        return TrainingPlanView(appState: _appState);
       case 3:
-        return ActivitiesView(appState: _appState);
+        return AnalyticsView(appState: _appState);
       case 4:
-        return StrengthView(appState: _appState);
+        return ActivitiesView(appState: _appState);
       case 5:
+        return StrengthView(appState: _appState);
+      case 6:
         return DeviceSyncView(appState: _appState);
       default:
         return DashboardView(appState: _appState);

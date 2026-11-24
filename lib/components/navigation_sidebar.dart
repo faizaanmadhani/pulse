@@ -73,19 +73,25 @@ class NavigationSidebar extends StatelessWidget {
           ),
           _buildNavItem(
             index: 2,
+            icon: CupertinoIcons.sparkles,
+            selectedIcon: CupertinoIcons.sparkles,
+            label: 'Training Plan',
+          ),
+          _buildNavItem(
+            index: 3,
             icon: CupertinoIcons.chart_bar,
             selectedIcon: CupertinoIcons.chart_bar_fill,
             label: 'Analytics',
           ),
           _buildNavItem(
-            index: 3,
+            index: 4,
             icon: CupertinoIcons.list_bullet,
             selectedIcon: CupertinoIcons.list_bullet,
             label: 'Activities',
             trailingCount: appState.isSignedIn ? appState.activities.length : null,
           ),
           _buildNavItem(
-            index: 4,
+            index: 5,
             icon: CupertinoIcons.flame,
             selectedIcon: CupertinoIcons.flame_fill,
             label: 'Strength',
@@ -98,7 +104,7 @@ class NavigationSidebar extends StatelessWidget {
             child: Text('Connections', style: AppTypography.labelCaps),
           ),
           _buildNavItem(
-            index: 5,
+            index: 6,
             icon: CupertinoIcons.arrow_2_circlepath,
             selectedIcon: CupertinoIcons.arrow_2_circlepath_circle_fill,
             label: 'Garmin & Devices',
@@ -153,8 +159,9 @@ class NavigationSidebar extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: () {
+            appState.selectPlannedWorkout(null);
             appState.setNavIndex(index);
-            if (index == 3) {
+            if (index == 4) {
               appState.setSelectedActivityId(null);
             }
           },
@@ -251,8 +258,9 @@ class NavigationSidebar extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: () {
+            appState.selectPlannedWorkout(null);
             if (appState.isSignedIn) {
-              appState.setNavIndex(5);
+              appState.setNavIndex(6);
             } else {
               showGarminSignInDialog(context, appState);
             }
