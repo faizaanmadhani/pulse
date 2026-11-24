@@ -814,6 +814,135 @@ class ChatGptService {
     );
   }
 
+  /// Builds a self-contained prompt the user can copy into ChatGPT (web/app)
+  /// to generate a structured JSON training plan grounded in their Garmin data.
+  String buildCopyablePlanPrompt({
+    required AthleteContext athleteContext,
+    required TrainingPlanConfig config,
+    int? totalWeeks,
+    DateTime? startDate,
+    UnitSystem unitSystem = UnitSystem.metric,
+    String? extraNotes,
+  }) {
+    final effectiveStart = (startDate ?? athleteContext.asOfDate).toLocal();
+    final startKey = PlannedWorkout.formatLocalDate(effectiveStart);
+    final weeksCount = _resolveTotalWeeks(
+      config: config,
+      startDate: effectiveStart,
+      explicitWeeks: totalWeeks,
+    );
+
+    final instructions = _buildPlanGenerationInstructions(
+      athleteContext: athleteContext,
+      config: config,
+      startDateKey: startKey,
+      weeksCount: weeksCount,
+      unitSystem: unitSystem,
+    );
+
+    final buf = StringBuffer()
+      ..writeln(instructions.trim())
+      ..writeln()
+      ..writeln('REQUEST:')
+      ..writeln(
+        'Generate a complete $weeksCount-week structured triathlon training plan '
+        'starting $startKey for "${config.raceName}" (${config.raceDistance}'
+        '${config.raceDate.isNotEmpty ? ', race date ${config.raceDate}' : ''}) '
+        'within ${config.weeklyHoursBudget.toStringAsFixed(1)} hrs/week.',
+      );
+    final notes = extraNotes?.trim() ?? '';
+    if (notes.isNotEmpty) {
+      buf.writeln('Additional athlete notes: $notes');
+    }
+    buf
+      ..writeln()
+      ..writeln(
+        'IMPORTANT EXPORT FORMAT: Reply with ONLY a single ```json ... ``` code block '
+        'conforming strictly to this JSON schema (no extra commentary outside the code block):',
+      )
+      ..writeln(jsonEncode(trainingPlanJsonSchema()));
+    return buf.toString();
+  }
+
+  /// Builds a self-contained prompt the user can copy into ChatGPT (web/app)
+  /// to adapt their remaining active training plan.
+  String buildCopyableAdaptPrompt({
+    required AthleteContext athleteContext,
+    required TrainingPlan existingPlan,
+    String? userFeedback,
+    DateTime? referenceDate,
+    UnitSystem unitSystem = UnitSystem.metric,
+  }) {
+    final effectiveRef = (referenceDate ?? athleteContext.asOfDate).toLocal();
+    final refKey = PlannedWorkout.formatLocalDate(effectiveRef);
+    final trimmedFeedback = userFeedback?.trim() ?? '';
+
+    final instructions = _buildPlanAdaptationInstructions(
+      athleteContext: athleteContext,
+      existingPlan: existingPlan,
+      referenceDateKey: refKey,
+      unitSystem: unitSystem,
+    );
+
+    final buf = StringBuffer()
+      ..writeln(instructions.trim())
+      ..writeln()
+      ..writeln(
+        'Adapt the remaining training plan from $refKey onward while keeping '
+        'all workouts before $refKey and all completed or skipped workouts intact.',
+      );
+    if (trimmedFeedback.isNotEmpty) {
+      buf.writeln('Athlete feedback / request: $trimmedFeedback');
+    }
+    buf
+      ..writeln()
+      ..writeln('Current plan JSON:')
+      ..writeln(jsonEncode(existingPlan.toJson()))
+      ..writeln()
+      ..writeln(
+        'IMPORTANT EXPORT FORMAT: Reply with ONLY a single ```json ... ``` code block '
+        'conforming strictly to this JSON schema (no extra commentary outside the code block):',
+      )
+      ..writeln(jsonEncode(trainingPlanJsonSchema()));
+    return buf.toString();
+  }
+
+  /// Parses, validates, normalizes, and finalizes a training plan JSON string
+  /// pasted or imported from ChatGPT web/app.
+  TrainingPlan parseImportedPlan(
+    String rawText, {
+    required TrainingPlanConfig config,
+    TrainingPlan? existingPlan,
+    DateTime? referenceDate,
+  }) {
+    if (rawText.trim().isEmpty) {
+      throw const ChatGptApiException(
+        400,
+        'Paste the JSON training plan from ChatGPT before importing.',
+      );
+    }
+    final decoded = _decodePlanJson(rawText);
+    _validateRawPlanJson(decoded);
+    _normalizeRawPlanJson(decoded);
+
+    final parsed = TrainingPlan.fromJson(decoded);
+    final finalized = _finalizePlan(
+      parsed,
+      config: existingPlan?.config ?? config,
+    );
+
+    if (existingPlan != null) {
+      final effectiveRef = (referenceDate ?? DateTime.now()).toLocal();
+      final refKey = PlannedWorkout.formatLocalDate(effectiveRef);
+      return _preservePastAndLockedWorkouts(
+        existingPlan: existingPlan,
+        adaptedPlan: finalized,
+        referenceDateKey: refKey,
+      );
+    }
+    return finalized;
+  }
+
   /// Returns the 5-level-safe OpenAI Structured Outputs JSON Schema for a
   /// triathlon `TrainingPlan`.
   static Map<String, dynamic> trainingPlanJsonSchema() {
@@ -1267,6 +1396,13 @@ class ChatGptService {
 
   static String _stripJsonCodeFences(String raw) {
     var trimmed = raw.trim();
+    final fenceMatch = RegExp(
+      r'```(?:json)?\s*\r?\n([\s\S]*?)```',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
+    if (fenceMatch != null) {
+      return fenceMatch.group(1)!.trim();
+    }
     if (trimmed.startsWith('```')) {
       final firstNewline = trimmed.indexOf('\n');
       if (firstNewline != -1) {
@@ -1278,6 +1414,13 @@ class ChatGptService {
         trimmed = trimmed.substring(0, trimmed.length - 3);
       }
       trimmed = trimmed.trim();
+    }
+    if (!trimmed.startsWith('{')) {
+      final start = trimmed.indexOf('{');
+      final end = trimmed.lastIndexOf('}');
+      if (start != -1 && end > start) {
+        return trimmed.substring(start, end + 1).trim();
+      }
     }
     return trimmed;
   }

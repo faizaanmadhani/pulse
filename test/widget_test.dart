@@ -1857,7 +1857,7 @@ void main() {
       of: find.byType(Dialog),
       matching: find.byType(TextField),
     );
-    await tester.enterText(dialogField, 'Reduce tomorrow swim intensity.');
+    await tester.enterText(dialogField.first, 'Reduce tomorrow swim intensity.');
     await tester.tap(find.text('Adapt Plan'));
     await tester.pumpAndSettle();
 

@@ -1579,6 +1579,58 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Builds a copy-ready prompt for ChatGPT web/app using the athlete's live
+  /// Garmin telemetry, derived zones, and setup [config].
+  String buildCopyablePlanPrompt(
+    TrainingPlanConfig config, {
+    int? totalWeeks,
+    String? extraNotes,
+  }) {
+    return _chatGptService.buildCopyablePlanPrompt(
+      athleteContext: deriveAthleteContext(),
+      config: config,
+      totalWeeks: totalWeeks,
+      unitSystem: _unitSystem,
+      extraNotes: extraNotes,
+    );
+  }
+
+  /// Builds a copy-ready adaptation prompt for ChatGPT web/app based on the
+  /// active plan, adherence, and optional [userFeedback].
+  String buildCopyableAdaptPrompt({String? userFeedback}) {
+    if (_activeTrainingPlan == null) return '';
+    return _chatGptService.buildCopyableAdaptPrompt(
+      athleteContext: deriveAthleteContext(),
+      existingPlan: _activeTrainingPlan!,
+      userFeedback: userFeedback,
+      unitSystem: _unitSystem,
+    );
+  }
+
+  /// Parses & validates a training plan JSON string pasted from ChatGPT web/app.
+  /// Returns the finalized [TrainingPlan] on success (or `null` and sets [planError]).
+  TrainingPlan? importTrainingPlanFromText(
+    String rawText, {
+    required TrainingPlanConfig config,
+    bool asAdaptation = false,
+  }) {
+    _planError = null;
+    try {
+      final parsed = _chatGptService.parseImportedPlan(
+        rawText,
+        config: config,
+        existingPlan: asAdaptation ? _activeTrainingPlan : null,
+      );
+      final matched = WorkoutComplianceMatcher.matchPlan(parsed, activities);
+      notifyListeners();
+      return matched;
+    } catch (e) {
+      _planError = e is ChatGptApiException ? e.message : e.toString();
+      notifyListeners();
+      return null;
+    }
+  }
+
   Future<void> updatePlannedWorkoutStatus(
     String workoutId,
     WorkoutStatus status,

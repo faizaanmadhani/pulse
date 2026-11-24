@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../components/chatgpt_connect_dialog.dart';
@@ -66,6 +67,7 @@ class _TrainingPlanViewState extends State<TrainingPlanView> {
   late final TextEditingController _swimCssController;
   late final TextEditingController _bikeFtpController;
   late final TextEditingController _chatInputController;
+  late final TextEditingController _importJsonController;
   late final ScrollController _chatScrollController;
 
   String _raceDistance = '70.3';
@@ -86,6 +88,8 @@ class _TrainingPlanViewState extends State<TrainingPlanView> {
 
   String? _formValidationError;
   TrainingPlan? _draftPreviewPlan;
+  bool _promptCopied = false;
+  bool _showPromptPreview = false;
   final Set<int> _expandedWeeks = <int>{};
   String? _expandedWeeksPlanId;
 
@@ -102,6 +106,7 @@ class _TrainingPlanViewState extends State<TrainingPlanView> {
     _swimCssController = TextEditingController();
     _bikeFtpController = TextEditingController();
     _chatInputController = TextEditingController();
+    _importJsonController = TextEditingController();
     _chatScrollController = ScrollController();
 
     final plan = appState.activeTrainingPlan;
@@ -178,6 +183,7 @@ class _TrainingPlanViewState extends State<TrainingPlanView> {
     _swimCssController.dispose();
     _bikeFtpController.dispose();
     _chatInputController.dispose();
+    _importJsonController.dispose();
     _chatScrollController.dispose();
     super.dispose();
   }
@@ -953,8 +959,160 @@ class _TrainingPlanViewState extends State<TrainingPlanView> {
           _buildPlanPreviewCard(_draftPreviewPlan!),
         ],
         const SizedBox(height: 16),
+        _buildManualImportCard(context),
+        const SizedBox(height: 16),
         _buildCoachChatCard(context),
       ],
+    );
+  }
+
+  Widget _buildManualImportCard(BuildContext context) {
+    final quickConfig = _tryBuildConfigQuietly();
+    final previewPrompt = quickConfig == null
+        ? null
+        : appState.buildCopyablePlanPrompt(
+            quickConfig,
+            extraNotes: _additionalNotesController.text.trim(),
+          );
+
+    return MacCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    CupertinoIcons.doc_on_clipboard,
+                    size: 16,
+                    color: ChatGptConnectDialog.chatGptTeal,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      'Use ChatGPT Web / App (Copy & Paste)',
+                      style: AppTypography.headlineMd,
+                    ),
+                  ),
+                ],
+              ),
+              if (_promptCopied)
+                MacStatusBadge(
+                  label: 'Prompt Copied',
+                  color: AppColors.runTertiary,
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '1. Copy the tailored prompt (includes your Garmin CTL/ATL/TSB, paces, CSS, HR zones, and exact JSON schema) and paste it into ChatGPT.\n'
+            '2. Paste ChatGPT’s response below and click Import & Preview Plan.',
+            style: AppTypography.bodySm,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              MacPushButton(
+                label: _promptCopied ? 'Copied Prompt' : 'Copy Prompt for ChatGPT',
+                icon: _promptCopied
+                    ? CupertinoIcons.checkmark
+                    : CupertinoIcons.doc_on_doc,
+                isPrimary: true,
+                onPressed: () async {
+                  final cfg = _validateAndBuildConfig();
+                  if (cfg == null) return;
+                  final prompt = appState.buildCopyablePlanPrompt(
+                    cfg,
+                    extraNotes: _additionalNotesController.text.trim(),
+                  );
+                  await Clipboard.setData(ClipboardData(text: prompt));
+                  if (!mounted) return;
+                  setState(() => _promptCopied = true);
+                },
+              ),
+              if (previewPrompt != null)
+                MacPushButton(
+                  label: _showPromptPreview ? 'Hide Prompt' : 'Preview Prompt',
+                  icon: _showPromptPreview
+                      ? CupertinoIcons.eye_slash
+                      : CupertinoIcons.eye,
+                  onPressed: () =>
+                      setState(() => _showPromptPreview = !_showPromptPreview),
+                ),
+            ],
+          ),
+          if (_showPromptPreview && previewPrompt != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 160),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceLowest,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.borderDivider),
+              ),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  previewPrompt,
+                  style: AppTypography.telemetrySm.copyWith(fontSize: 11),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextField(
+            controller: _importJsonController,
+            maxLines: 5,
+            minLines: 3,
+            style: AppTypography.telemetrySm.copyWith(
+              color: AppColors.onSurface,
+              fontSize: 11.5,
+            ),
+            decoration: _inputDecoration(
+              'Paste ChatGPT JSON output here (raw JSON or ```json ... ``` block)…',
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (_importJsonController.text.isNotEmpty)
+                MacPushButton(
+                  label: 'Clear',
+                  onPressed: () =>
+                      setState(() => _importJsonController.clear()),
+                ),
+              MacPushButton(
+                label: 'Import & Preview Plan',
+                icon: CupertinoIcons.arrow_down_doc,
+                isPrimary: true,
+                onPressed: () {
+                  final cfg = _validateAndBuildConfig();
+                  if (cfg == null) return;
+                  final imported = appState.importTrainingPlanFromText(
+                    _importJsonController.text,
+                    config: cfg,
+                  );
+                  if (!mounted || imported == null) return;
+                  setState(() {
+                    _draftPreviewPlan = imported;
+                  });
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -982,7 +1140,9 @@ class _TrainingPlanViewState extends State<TrainingPlanView> {
                     color: ChatGptConnectDialog.chatGptTeal,
                   ),
                   const SizedBox(width: 8),
-                  Text('Generated Plan Preview', style: AppTypography.headlineMd),
+                  Flexible(
+                    child: Text('Generated Plan Preview', style: AppTypography.headlineMd),
+                  ),
                 ],
               ),
               MacStatusBadge(
@@ -2280,10 +2440,13 @@ class _AdaptPlanDialog extends StatefulWidget {
 
 class _AdaptPlanDialogState extends State<_AdaptPlanDialog> {
   final _feedbackController = TextEditingController();
+  final _importAdaptedController = TextEditingController();
+  bool _promptCopied = false;
 
   @override
   void dispose() {
     _feedbackController.dispose();
+    _importAdaptedController.dispose();
     super.dispose();
   }
 
@@ -2341,6 +2504,48 @@ class _AdaptPlanDialogState extends State<_AdaptPlanDialog> {
                         AppTypography.bodyMd.copyWith(color: AppColors.onSurface),
                     decoration: widget.inputDecoration,
                   ),
+                  const SizedBox(height: 14),
+                  Divider(height: 1, color: AppColors.borderDivider),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      Text(
+                        'Or Copy Prompt & Paste Adapted JSON',
+                        style: AppTypography.headlineSm,
+                      ),
+                      MacPushButton(
+                        label: _promptCopied ? 'Copied!' : 'Copy Adapt Prompt',
+                        icon: _promptCopied
+                            ? CupertinoIcons.checkmark
+                            : CupertinoIcons.doc_on_doc,
+                        onPressed: () async {
+                          final prompt = widget.appState.buildCopyableAdaptPrompt(
+                            userFeedback: _feedbackController.text.trim(),
+                          );
+                          await Clipboard.setData(ClipboardData(text: prompt));
+                          if (!mounted) return;
+                          setState(() => _promptCopied = true);
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _importAdaptedController,
+                    enabled: !isGenerating,
+                    maxLines: 3,
+                    style: AppTypography.telemetrySm.copyWith(
+                      color: AppColors.onSurface,
+                      fontSize: 11.5,
+                    ),
+                    decoration: widget.inputDecoration.copyWith(
+                      hintText: 'Paste adapted JSON from ChatGPT here…',
+                    ),
+                  ),
                   if (widget.appState.planError != null) ...[
                     const SizedBox(height: 12),
                     Container(
@@ -2377,8 +2582,10 @@ class _AdaptPlanDialogState extends State<_AdaptPlanDialog> {
                     ),
                   ],
                   const SizedBox(height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
                       MacPushButton(
                         label: 'Cancel',
@@ -2389,7 +2596,28 @@ class _AdaptPlanDialogState extends State<_AdaptPlanDialog> {
                                 Navigator.of(context).pop(false);
                               },
                       ),
-                      const SizedBox(width: 8),
+                      MacPushButton(
+                        label: 'Import Adapted JSON',
+                        icon: CupertinoIcons.arrow_down_doc,
+                        onPressed: isGenerating
+                            ? null
+                            : () async {
+                                final active = widget.appState.activeTrainingPlan;
+                                if (active == null) return;
+                                final adapted =
+                                    widget.appState.importTrainingPlanFromText(
+                                  _importAdaptedController.text,
+                                  config: active.config,
+                                  asAdaptation: true,
+                                );
+                                if (adapted == null) return;
+                                await widget.appState
+                                    .applyGeneratedPlan(adapted);
+                                if (context.mounted) {
+                                  Navigator.of(context).pop(true);
+                                }
+                              },
+                      ),
                       MacPushButton(
                         label: isGenerating ? 'Adapting…' : 'Adapt Plan',
                         icon: CupertinoIcons.wand_stars,

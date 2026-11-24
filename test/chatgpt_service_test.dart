@@ -2189,4 +2189,157 @@ void main() {
       );
     });
   });
+
+  group('ChatGptService copy-paste prompt & manual JSON import', () {
+    test('buildCopyablePlanPrompt includes athlete context, config, and JSON schema', () {
+      final service = ChatGptService();
+      final context = AthleteContext(
+        asOfDate: DateTime(2026, 11, 24),
+        ctl: 55,
+        atl: 48,
+        tsb: 7,
+        acwr: 0.87,
+        avgWeeklyHours4w: 8.5,
+        avgWeeklyHours12w: 7.2,
+        zones: const AthleteZonesSnapshot(
+          maxHr: 190,
+          lthr: 170,
+          runThresholdPaceSecPerKm: 265,
+          swimCssSecPer100m: 105,
+          bikeFtpWatts: 250,
+          hrZones: [
+            HrZoneRange(zone: 1, label: 'Recovery', minBpm: 0, maxBpm: 133),
+            HrZoneRange(zone: 2, label: 'Aerobic', minBpm: 134, maxBpm: 149),
+            HrZoneRange(zone: 3, label: 'Tempo', minBpm: 150, maxBpm: 162),
+            HrZoneRange(zone: 4, label: 'Threshold', minBpm: 163, maxBpm: 174),
+            HrZoneRange(zone: 5, label: 'VO2 Max', minBpm: 175, maxBpm: 190),
+          ],
+        ),
+      );
+      const config = TrainingPlanConfig(
+        raceName: 'Ironman 70.3 Dallas',
+        raceDistance: '70.3',
+        raceDate: '2027-03-14',
+        weeklyHoursBudget: 9.0,
+        longRunDay: 'Sunday',
+        longRideDay: 'Saturday',
+        restDay: 'Friday',
+        limiterSport: 'Swim',
+      );
+
+      final prompt = service.buildCopyablePlanPrompt(
+        athleteContext: context,
+        config: config,
+        totalWeeks: 8,
+        extraNotes: 'Prefer morning swims',
+      );
+
+      expect(prompt, contains('Ironman 70.3 Dallas'));
+      expect(prompt, contains('9.0 hrs/week'));
+      expect(prompt, contains('Prefer morning swims'));
+      expect(prompt, contains('zwiftRide'));
+      expect(prompt, contains('<= 30'));
+      expect(prompt, contains('"weeks"'));
+      expect(prompt, contains('```json'));
+    });
+
+    test('parseImportedPlan extracts JSON from prose + code fence and caps Brick run leg', () {
+      final service = ChatGptService();
+      const config = TrainingPlanConfig(
+        raceName: 'Target 70.3',
+        raceDistance: '70.3',
+        raceDate: '2027-03-14',
+        weeklyHoursBudget: 8.0,
+      );
+
+      final rawWithProse = '''
+Here is your personalized triathlon plan:
+
+```json
+${jsonEncode({
+        'id': 'plan_imported_1',
+        'name': 'Imported 70.3 Plan',
+        'coachOverview': '80/20 polarized build',
+        'weeks': [
+          {
+            'weekNumber': 1,
+            'startDate': '2026-11-24',
+            'phaseName': 'Base',
+            'focusSummary': 'Aerobic foundation',
+            'targetHours': 6.0,
+            'targetTss': 320,
+            'workouts': [
+              {
+                'id': 'imp_brick',
+                'date': '2026-11-28',
+                'title': 'Saturday Brick',
+                'discipline': 'bike',
+                'archetype': 'brick',
+                'estimatedDurationMinutes': 120,
+                'estimatedTss': 110,
+                'coachNotes': 'Smooth T2',
+                'rationale': 'Brick durability',
+                'blocks': [],
+                'zwiftPrescription': {
+                  'durationMinutes': 75,
+                  'difficulty': 'Tempo',
+                  'targetTss': 75,
+                  'zwiftCategory': 'Tempo',
+                  'suggestedSearchTerms': ['SST Short'],
+                },
+                'brickRunLeg': {
+                  'id': 'imp_brick_run',
+                  'title': 'T2 Run',
+                  'archetype': 'easy',
+                  'estimatedDurationMinutes': 45,
+                  'estimatedTss': 35,
+                  'steps': [
+                    {
+                      'kind': 'steady',
+                      'endCondition': 'time',
+                      'endValue': 2700,
+                      'targetKind': 'heartRateZone',
+                      'targetLow': 2,
+                      'targetHigh': 2,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      })}
+```
+
+Let me know if you want any tweaks!
+''';
+
+      final plan = service.parseImportedPlan(rawWithProse, config: config);
+      expect(plan.name, 'Imported 70.3 Plan');
+      expect(plan.weeks, hasLength(1));
+      final brick = plan.weeks.first.workouts.first;
+      expect(brick.archetype, WorkoutArchetype.brick);
+      expect(brick.brickRunLeg, isNotNull);
+      expect(brick.brickRunLeg!.estimatedDurationMinutes, lessThanOrEqualTo(30));
+    });
+
+    test('parseImportedPlan rejects empty or malformed input', () {
+      final service = ChatGptService();
+      const config = TrainingPlanConfig(
+        raceName: 'Target',
+        raceDistance: 'Olympic',
+        raceDate: '2027-03-14',
+        weeklyHoursBudget: 6.0,
+      );
+
+      expect(
+        () => service.parseImportedPlan('   ', config: config),
+        throwsA(isA<ChatGptApiException>()),
+      );
+      expect(
+        () => service.parseImportedPlan('not json at all', config: config),
+        throwsA(isA<ChatGptApiException>()),
+      );
+    });
+  });
 }
